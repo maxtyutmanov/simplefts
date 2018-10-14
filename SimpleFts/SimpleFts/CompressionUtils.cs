@@ -8,25 +8,17 @@ namespace SimpleFts
 {
     public static class CompressionUtils
     {
-        public static void CompressAndAppendTo(this Stream source, Stream target)
+        public static void CompressChunkAndAppendTo(this Stream source, Stream target)
         {
             source.Position = 0;
 
-            var chunkHeaderPosition = target.Position;
-            target.Position += sizeof(long);
+            target.WriteLong(source.Length);
 
-            var targetStreamPrevPosition = target.Position;
             GZipStream gzip = null;
             try
             {
                 gzip = new GZipStream(target, CompressionMode.Compress, true);
                 source.CopyTo(gzip);
-                gzip.Close();
-
-                // prepend the chunk with its length in the compressed stream
-                var compressedLength = target.Position - targetStreamPrevPosition;
-                target.Position = chunkHeaderPosition;
-                target.WriteLong(compressedLength);
             }
             finally
             {
@@ -37,14 +29,22 @@ namespace SimpleFts
         public static byte[] DecompressChunk(this Stream stream, long chunkOffset)
         {
             stream.Position = chunkOffset;
-            long compressedLength = stream.ReadLong();
-            
+            long originalLenght = stream.ReadLong();
+
             using (var gzip = new GZipStream(stream, CompressionMode.Decompress, true))
             {
-                var buffer = new byte[compressedLength];
+                var buffer = new byte[originalLenght];
                 gzip.Read(buffer, 0, buffer.Length);
                 return buffer;
             }
+        }
+
+        private static int ReadInt(this Stream stream)
+        {
+            var buffer = new byte[sizeof(int)];
+            stream.Read(buffer, 0, buffer.Length);
+
+            return BitConverter.ToInt32(buffer, 0);
         }
 
         private static long ReadLong(this Stream stream)
