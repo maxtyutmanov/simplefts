@@ -1,21 +1,21 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+﻿using FluentAssertions;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Xunit;
 
 namespace SimpleFts.Tests
 {
-    [TestClass]
-    public class DataFileTests
+    public class DataFileTests : IDisposable
     {
         private const string DataDir = @".\datadir";
 
         private DataFile _df;
 
-        [TestInitialize]
-        public void Init()
+        public DataFileTests()
         {
             if (Directory.Exists(DataDir))
             {
@@ -23,8 +23,7 @@ namespace SimpleFts.Tests
             }
         }
 
-        [TestCleanup]
-        public void Cleanup()
+        public void Dispose()
         {
             _df?.Dispose();
             if (Directory.Exists(DataDir))
@@ -33,8 +32,8 @@ namespace SimpleFts.Tests
             }
         }
 
-        [TestMethod]
-        public void AddSingleDocumentAndGetItBack()
+        [Fact]
+        public void AddSingleDocumentAndGetItBack_ShouldBeOriginalDocument()
         {
             _df = new DataFile(DataDir);
             var doc = new Document();
@@ -42,15 +41,30 @@ namespace SimpleFts.Tests
 
             var offset = _df.AddDocumentAndGetChunkOffset(doc);
 
-            var chunk = _df.EnumerateChunk(offset).ToArray();
+            var chunk = _df.GetChunk(offset).ToArray();
 
-            Assert.AreEqual(1, chunk.Length);
+            chunk.Should().BeEquivalentTo(new[] { doc });
+        }
 
-            var readDoc = chunk[0];
+        [Fact]
+        public void AddToTwoChunksAndGetFromBoth_ShouldBeOriginalDocuments()
+        {
+            _df = new DataFile(DataDir, 1);
 
-            Assert.AreEqual(doc.Fields.Count, readDoc.Fields.Count);
-            Assert.AreEqual(doc.Fields["name"].Count, readDoc.Fields["name"].Count);
-            Assert.AreEqual(doc.Fields["name"].First(), readDoc.Fields["name"].First());
+            var doc1 = new Document();
+            doc1.AddField("name", "john");
+
+            var doc2 = new Document();
+            doc2.AddField("name", "jack");
+
+            var offsetOfChunk1 = _df.AddDocumentAndGetChunkOffset(doc1);
+            var offsetOfChunk2 = _df.AddDocumentAndGetChunkOffset(doc2);
+
+            var chunk1 = _df.GetChunk(offsetOfChunk1);
+            var chunk2 = _df.GetChunk(offsetOfChunk2);
+
+            chunk1.Should().BeEquivalentTo(new[] { doc1 });
+            chunk2.Should().BeEquivalentTo(new[] { doc2 });
         }
     }
 }

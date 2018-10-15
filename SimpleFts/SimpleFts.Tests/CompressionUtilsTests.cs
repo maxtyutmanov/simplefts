@@ -1,15 +1,16 @@
+using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IO;
 using System.Text;
+using Xunit;
 
 namespace SimpleFts.Tests
 {
-    [TestClass]
     public class CompressionTests
     {
         private static UTF8Encoding Encoding = new UTF8Encoding(false);
 
-        [TestMethod]
+        [Fact]
         public void CompressedAppendToEmptyStreamAndDecompress()
         {
             var sourceStr = "TEST this is TEST";
@@ -21,11 +22,11 @@ namespace SimpleFts.Tests
                 var bytes = target.DecompressChunk(0);
                 var decompressedStr = Encoding.GetString(bytes);
 
-                Assert.AreEqual(sourceStr, decompressedStr);
+                sourceStr.Should().BeEquivalentTo(decompressedStr);
             }
         }
 
-        [TestMethod]
+        [Fact]
         public void CompressedAppendToNonEmptyStreamAndDecompress()
         {
             var sourceStr1 = "TEST this is TEST";
@@ -45,8 +46,8 @@ namespace SimpleFts.Tests
                 var decompressedBytes2 = target.DecompressChunk(chunk2Position);
                 var decompressedStr2 = Encoding.GetString(decompressedBytes2);
 
-                Assert.AreEqual(sourceStr1, decompressedStr1);
-                Assert.AreEqual(sourceStr2, decompressedStr2);
+                sourceStr1.Should().Be(decompressedStr1);
+                sourceStr2.Should().Be(decompressedStr2);
             }
         }
 

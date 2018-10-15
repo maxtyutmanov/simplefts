@@ -3,6 +3,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,7 +30,7 @@ namespace SimpleFts
             _bufferPath = Path.Combine(dataDir, "buffer.dat");
             _mainPath = Path.Combine(dataDir, "main.dat");
 
-            _buffer = new FileStream(_bufferPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+            _buffer = new FileStream(_bufferPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
             _main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
 
             _chunkSize = chunkSize;
@@ -37,7 +38,7 @@ namespace SimpleFts
 
         public long AddDocumentAndGetChunkOffset(Document d)
         {
-            if (_docsInCurrentChunk == DefaultChunkSize)
+            if (_docsInCurrentChunk == _chunkSize)
             {
                 FlushBuffer();
             }
@@ -60,15 +61,16 @@ namespace SimpleFts
             _main.Dispose();
         }
 
-        public IEnumerable<Document> EnumerateChunk(long chunkOffset)
+        public List<Document> GetChunk(long chunkOffset)
         {
             if (chunkOffset >= _main.Length)
             {
-                return EnumerateBuffer();
+                // this chunk is not yet flushed from the buffer into the main data file
+                return EnumerateBuffer().ToList();
             }
             else
             {
-                return EnumerateChunkFromMain(chunkOffset);
+                return EnumerateChunkFromMain(chunkOffset).ToList();
             }
         }
 
@@ -131,6 +133,7 @@ namespace SimpleFts
 
                 _buffer.CompressChunkAndAppendTo(_main);
                 _main.Flush();
+                _docsInCurrentChunk = 0;
                 // truncate buffer
                 _buffer.SetLength(0);
             }
