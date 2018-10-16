@@ -19,7 +19,9 @@ namespace SimpleFts
         private readonly FileStream _buffer;
         private readonly FileStream _main;
         private readonly int _chunkSize;
-        private readonly ReaderWriterLockSlim _bufferLock = new ReaderWriterLockSlim();
+        
+        // TODO: replace with async rwlock
+        private readonly SemaphoreSlim _bufferLock = new SemaphoreSlim(1, 1);
 
         private int _docsInCurrentChunk = 0;
 
@@ -36,18 +38,18 @@ namespace SimpleFts
             _chunkSize = chunkSize;
         }
 
-        public long AddDocumentAndGetChunkOffset(Document d)
+        public async Task<long> AddDocumentAndGetChunkOffset(Document d)
         {
             if (_docsInCurrentChunk == _chunkSize)
             {
-                FlushBuffer();
+                await FlushBuffer().ConfigureAwait(false);
             }
 
             var docStr = JsonConvert.SerializeObject(d);
             var docBytes = Encoding.UTF8.GetBytes(docStr);
 
-            _buffer.Write(docBytes, 0, docBytes.Length);
-            _buffer.Flush();
+            await _buffer.WriteAsync(docBytes, 0, docBytes.Length).ConfigureAwait(false);
+            await _buffer.FlushAsync().ConfigureAwait(false);
 
             ++_docsInCurrentChunk;
 
@@ -61,26 +63,27 @@ namespace SimpleFts
             _main.Dispose();
         }
 
-        public List<Document> GetChunk(long chunkOffset)
+        public async Task<List<Document>> GetChunk(long chunkOffset)
         {
             if (chunkOffset >= _main.Length)
             {
                 // this chunk is not yet flushed from the buffer into the main data file
-                return EnumerateBuffer().ToList();
+                return await ReadDocumentsFromBuffer().ConfigureAwait(false);
             }
             else
             {
-                return EnumerateChunkFromMain(chunkOffset).ToList();
+                return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
             }
         }
 
-        private IEnumerable<Document> EnumerateBuffer()
+        private async Task<List<Document>> ReadDocumentsFromBuffer()
         {
-            _bufferLock.EnterReadLock();
+            await _bufferLock.WaitAsync().ConfigureAwait(false);
 
             try
             {
                 var serializer = new JsonSerializer();
+                var result = new List<Document>(_docsInCurrentChunk);
 
                 using (var buffer = new FileStream(_bufferPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (var sr = new StreamReader(buffer, Encoding.UTF8, false, 1024, true))
@@ -88,24 +91,27 @@ namespace SimpleFts
                 {
                     while (!sr.EndOfStream)
                     {
-                        jr.Read();
-                        yield return serializer.Deserialize<Document>(jr);
+                        await jr.ReadAsync().ConfigureAwait(false);
+                        var doc = serializer.Deserialize<Document>(jr);
+                        result.Add(doc);
                     }
                 }
+
+                return result;
             }
             finally
             {
-                _bufferLock.ExitReadLock();
+                _bufferLock.Release();
             }
         }
 
-        private IEnumerable<Document> EnumerateChunkFromMain(long chunkOffset)
+        private async Task<List<Document>> ReadDocumentsFromMain(long chunkOffset)
         {
-            var serializer = new JsonSerializer();
-
             using (var main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite))
             {
-                var chunkBytes = main.DecompressChunk(chunkOffset);
+                var result = new List<Document>(_chunkSize);
+                var serializer = new JsonSerializer();
+                var chunkBytes = await main.GetDecompressedChunk(chunkOffset).ConfigureAwait(false);
 
                 using (var ms = new MemoryStream(chunkBytes))
                 using (var sr = new StreamReader(ms, Encoding.UTF8, false, 1024, true))
@@ -113,16 +119,19 @@ namespace SimpleFts
                 {
                     while (!sr.EndOfStream)
                     {
-                        jr.Read();
-                        yield return serializer.Deserialize<Document>(jr);
+                        await jr.ReadAsync().ConfigureAwait(false);
+                        var doc = serializer.Deserialize<Document>(jr);
+                        result.Add(doc);
                     }
                 }
+
+                return result;
             }
         }
 
-        private void FlushBuffer()
+        private async Task FlushBuffer()
         {
-            _bufferLock.EnterWriteLock();
+            await _bufferLock.WaitAsync().ConfigureAwait(false);
 
             try
             {
@@ -131,15 +140,15 @@ namespace SimpleFts
                     return;
                 }
 
-                _buffer.CompressChunkAndAppendTo(_main);
-                _main.Flush();
+                await _buffer.CompressChunkAndAppendTo(_main).ConfigureAwait(false);
+                await _main.FlushAsync().ConfigureAwait(false);
                 _docsInCurrentChunk = 0;
                 // truncate buffer
                 _buffer.SetLength(0);
             }
             finally
             {
-                _bufferLock.ExitWriteLock();
+                _bufferLock.Release();
             }
         }
     }

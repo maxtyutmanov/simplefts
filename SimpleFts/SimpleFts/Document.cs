@@ -6,20 +6,11 @@ namespace SimpleFts
 {
     public class Document
     {
-        public Dictionary<string, HashSet<string>> Fields { get; } = new Dictionary<string, HashSet<string>>();
+        public Dictionary<string, string> Fields { get; } = new Dictionary<string, string>();
 
-        public void AddField(string fieldName, string fieldValue)
+        public void SetField(string fieldName, string fieldValue)
         {
-            if (Fields.TryGetValue(fieldName, out var existingValues))
-            {
-                existingValues.Add(fieldValue);
-            }
-            else
-            {
-                var values = new HashSet<string>();
-                values.Add(fieldValue);
-                Fields[fieldName] = values;
-            }
+            Fields[fieldName] = fieldValue;
         }
     }
 }

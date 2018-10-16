@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace SimpleFts.Tests
@@ -11,15 +12,15 @@ namespace SimpleFts.Tests
         private static UTF8Encoding Encoding = new UTF8Encoding(false);
 
         [Fact]
-        public void CompressedAppendToEmptyStreamAndDecompress()
+        public async Task CompressedAppendToEmptyStreamAndDecompress()
         {
             var sourceStr = "TEST this is TEST";
 
             using (var source = GetStreamWithContents(sourceStr))
             using (var target = new MemoryStream())
             {
-                source.CompressChunkAndAppendTo(target);
-                var bytes = target.DecompressChunk(0);
+                await source.CompressChunkAndAppendTo(target);
+                var bytes = await target.GetDecompressedChunk(0);
                 var decompressedStr = Encoding.GetString(bytes);
 
                 sourceStr.Should().BeEquivalentTo(decompressedStr);
@@ -27,7 +28,7 @@ namespace SimpleFts.Tests
         }
 
         [Fact]
-        public void CompressedAppendToNonEmptyStreamAndDecompress()
+        public async Task CompressedAppendToNonEmptyStreamAndDecompress()
         {
             var sourceStr1 = "TEST this is TEST";
             var sourceStr2 = "THIS IS another TEST";
@@ -37,13 +38,13 @@ namespace SimpleFts.Tests
             using (var target = new MemoryStream())
             {
                 var chunk1Position = 0;
-                source1.CompressChunkAndAppendTo(target);
+                await source1.CompressChunkAndAppendTo(target);
                 var chunk2Position = target.Position;
-                source2.CompressChunkAndAppendTo(target);
+                await source2.CompressChunkAndAppendTo(target);
 
-                var decompressedBytes1 = target.DecompressChunk(chunk1Position);
+                var decompressedBytes1 = await target.GetDecompressedChunk(chunk1Position);
                 var decompressedStr1 = Encoding.GetString(decompressedBytes1);
-                var decompressedBytes2 = target.DecompressChunk(chunk2Position);
+                var decompressedBytes2 = await target.GetDecompressedChunk(chunk2Position);
                 var decompressedStr2 = Encoding.GetString(decompressedBytes2);
 
                 sourceStr1.Should().Be(decompressedStr1);

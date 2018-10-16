@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace SimpleFts.Tests
@@ -33,35 +34,35 @@ namespace SimpleFts.Tests
         }
 
         [Fact]
-        public void AddSingleDocumentAndGetItBack_ShouldBeOriginalDocument()
+        public async Task AddSingleDocumentAndGetItBack_ShouldBeOriginalDocument()
         {
             _df = new DataFile(DataDir);
             var doc = new Document();
-            doc.AddField("name", "john");
+            doc.SetField("name", "john");
 
-            var offset = _df.AddDocumentAndGetChunkOffset(doc);
+            var offset = await _df.AddDocumentAndGetChunkOffset(doc);
 
-            var chunk = _df.GetChunk(offset).ToArray();
+            var chunk = await _df.GetChunk(offset);
 
             chunk.Should().BeEquivalentTo(new[] { doc });
         }
 
         [Fact]
-        public void AddToTwoChunksAndGetFromBoth_ShouldBeOriginalDocuments()
+        public async Task AddToTwoChunksAndGetFromBoth_ShouldBeOriginalDocuments()
         {
             _df = new DataFile(DataDir, 1);
 
             var doc1 = new Document();
-            doc1.AddField("name", "john");
+            doc1.SetField("name", "john");
 
             var doc2 = new Document();
-            doc2.AddField("name", "jack");
+            doc2.SetField("name", "jack");
 
-            var offsetOfChunk1 = _df.AddDocumentAndGetChunkOffset(doc1);
-            var offsetOfChunk2 = _df.AddDocumentAndGetChunkOffset(doc2);
+            var offsetOfChunk1 = await _df.AddDocumentAndGetChunkOffset(doc1);
+            var offsetOfChunk2 = await _df.AddDocumentAndGetChunkOffset(doc2);
 
-            var chunk1 = _df.GetChunk(offsetOfChunk1);
-            var chunk2 = _df.GetChunk(offsetOfChunk2);
+            var chunk1 = await _df.GetChunk(offsetOfChunk1);
+            var chunk2 = await _df.GetChunk(offsetOfChunk2);
 
             chunk1.Should().BeEquivalentTo(new[] { doc1 });
             chunk2.Should().BeEquivalentTo(new[] { doc2 });
