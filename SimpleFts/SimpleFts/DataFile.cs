@@ -22,6 +22,7 @@ namespace SimpleFts
         
         // TODO: replace with async rwlock
         private readonly SemaphoreSlim _bufferLock = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _addLock = new SemaphoreSlim(1, 1);
 
         private int _docsInCurrentChunk = 0;
 
@@ -36,28 +37,42 @@ namespace SimpleFts
             _main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
 
             _chunkSize = chunkSize;
+
+            _docsInCurrentChunk = ReadDocumentsFromBuffer().Result.Count;
         }
 
         public async Task<long> AddDocumentAndGetChunkOffset(Document d)
         {
-            if (_docsInCurrentChunk == _chunkSize)
+            // we don't allow adding documents in parallel (it doesn't make sense anyway because of IO involved)
+
+            await _addLock.WaitAsync().ConfigureAwait(false);
+
+            try
             {
-                await FlushBuffer().ConfigureAwait(false);
+                if (_docsInCurrentChunk == _chunkSize)
+                {
+                    await FlushBuffer().ConfigureAwait(false);
+                }
+
+                var docStr = JsonConvert.SerializeObject(d);
+                var docBytes = Encoding.UTF8.GetBytes(docStr);
+
+                await _buffer.WriteAsync(docBytes, 0, docBytes.Length).ConfigureAwait(false);
+                await _buffer.FlushAsync().ConfigureAwait(false);
+
+                ++_docsInCurrentChunk;
+
+                return _main.Length;
             }
-
-            var docStr = JsonConvert.SerializeObject(d);
-            var docBytes = Encoding.UTF8.GetBytes(docStr);
-
-            await _buffer.WriteAsync(docBytes, 0, docBytes.Length).ConfigureAwait(false);
-            await _buffer.FlushAsync().ConfigureAwait(false);
-
-            ++_docsInCurrentChunk;
-
-            return _main.Length;
+            finally
+            {
+                _addLock.Release();
+            }
         }
 
         public void Dispose()
         {
+            _addLock.Dispose();
             _bufferLock.Dispose();
             _buffer.Dispose();
             _main.Dispose();
