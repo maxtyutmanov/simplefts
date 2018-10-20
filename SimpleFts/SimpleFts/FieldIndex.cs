@@ -3,17 +3,24 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SimpleFts
 {
     public class FieldIndex : IDisposable
     {
-        private readonly int MaxNumberOfTermsInOneIndexFile = 1000;
+        private const int EndOfIndexMarker = -1;
+
+        // We don't bother with exact calculation of the overhead required to store another long value in the hashset.
+        // Here we assume it is size of long value multiplied by some factor.
+        private const int PostingListEntrySizeScore = sizeof(long) * 4;
+        private readonly int MaxInMemoryIndexSizeScore = 100 * 1024 * 1024;
 
         private readonly Dictionary<string, HashSet<long>> _inMemoryIx = new Dictionary<string, HashSet<long>>();
         private readonly string _indexDir;
         private readonly List<FileStream> _indexFiles;
+        private long _currentInMemoryIndexSizeScore = 0;
 
         public FieldIndex(string globalIndexDir, string fieldName)
         {
@@ -26,12 +33,23 @@ namespace SimpleFts
         {
             _inMemoryIx.AddOrUpdate(
                 term,
-                () => new HashSet<long>(),
-                (postingList) => postingList.Add(dataFileOffset));
+                () =>
+                {
+                    // we roughly estimate the memory required to store a string as number of its characters multiplied by 2
+                    _currentInMemoryIndexSizeScore += term.Length * 2 + PostingListEntrySizeScore;
+                    return new HashSet<long>() { dataFileOffset };
+                },
+                (postingList) =>
+                {
+                    if (postingList.Add(dataFileOffset))
+                    {
+                        _currentInMemoryIndexSizeScore += PostingListEntrySizeScore;
+                    }
+                });
 
-            if (_inMemoryIx.Count >= MaxNumberOfTermsInOneIndexFile)
+            if (_currentInMemoryIndexSizeScore >= MaxInMemoryIndexSizeScore)
             {
-                await FlushToIndexFile();
+                await Commit();
             }
         }
 
@@ -40,28 +58,122 @@ namespace SimpleFts
             _indexFiles.ForEach(ixf => ixf.Dispose());
         }
 
-        public IEnumerable<long> Search(SearchQuery query)
+        public IEnumerable<long> Search(string term, CancellationToken ct)
         {
-            throw new NotImplementedException();
+            foreach (var indexFilePath in GetIndexFilePaths())
+            {
+                if (ct.IsCancellationRequested)
+                    break;
+
+                foreach (var postingListEntry in SearchIndexFile(term, indexFilePath, ct))
+                {
+                    if (ct.IsCancellationRequested)
+                        break;
+
+                    yield return postingListEntry;
+                }
+            }
         }
 
-        private async Task FlushToIndexFile()
+        private IEnumerable<long> SearchIndexFile(string targetTerm, string indexFilePath, CancellationToken ct)
         {
-            var currentIxFile = _indexFiles[_indexFiles.Count - 1];
+            var comparer = StringComparer.OrdinalIgnoreCase;
 
-            foreach (var termWithPostingList in _inMemoryIx.OrderBy(x => x.Key))
+            using (var ixFile = new FileStream(indexFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                var term = termWithPostingList.Key;
-                var postingList = termWithPostingList.Value;
-
-                await currentIxFile.WriteInt(term.Length);
-                await currentIxFile.WriteString(term);
-                await currentIxFile.WriteInt(postingList.Count);
-                
-                foreach (var entry in postingList)
+                while (!ct.IsCancellationRequested)
                 {
-                    await currentIxFile.WriteLong(entry);
+                    var nextTermOffset = ixFile.ReadLong();
+                    if (nextTermOffset == EndOfIndexMarker)
+                        break;
+
+                    var termLengthInBytes = ixFile.ReadInt();
+                    var term = ixFile.ReadUtf8String(termLengthInBytes);
+                    var cmpResult = comparer.Compare(term, targetTerm);
+
+                    if (cmpResult > 0)
+                    {
+                        // We've got past the place where the target term could have been in the index
+                        // (we conclude this because terms are sorted alphabetically)
+                        break;
+                    }
+                    else if (cmpResult < 0)
+                    {
+                        ixFile.Position = nextTermOffset;
+                        continue;
+                    }
+                    else
+                    {
+                        var postingListLength = ixFile.ReadInt();
+
+                        for (int i = 0; i < postingListLength; i++)
+                        {
+                            if (ct.IsCancellationRequested)
+                                break;
+
+                            var entry = ixFile.ReadLong();
+                            yield return entry;
+                        }
+
+                        break;
+                    }
                 }
+            }
+        }
+
+        public async Task Commit()
+        {
+            /*
+             * Index file structure:
+             * 
+             * <number of terms in the index file>
+             * <file offset (in bytes) of term 2> <length of term 1 representation (in bytes)> <term 1 UTF-8 bytes> <number of items in the posting list 1> <item 1 of the posting list 1> ... <item N of the posting list 1>
+             * <file offset (in bytes) of term 3> <length of term 2 representation (in bytes)> <term 2 UTF-8 bytes> <number of items in the posting list 2> <item 2 of the posting list 2> ... <item N of the posting list 2>
+             * ...
+             * (this goes on for all terms in the index)
+             * <end-of-index marker>
+             */
+
+            var newIxFile = OpenNextIndexFileForWrite();
+
+            try
+            {
+                foreach (var termWithPostingList in _inMemoryIx.OrderBy(x => x.Key))
+                {
+                    await WriteTermAndPostingList(newIxFile, termWithPostingList.Key, termWithPostingList.Value);
+                }
+
+                // termination sign
+                await newIxFile.WriteIntAsync(EndOfIndexMarker);
+                await newIxFile.FlushAsync();
+                _indexFiles.Add(newIxFile);
+
+                _inMemoryIx.Clear();
+                _currentInMemoryIndexSizeScore = 0;
+            }
+            catch (Exception)
+            {
+                // TODO: delete ix file
+
+                newIxFile?.Dispose();
+                throw;
+            }
+        }
+
+        private async Task WriteTermAndPostingList(Stream ixStream, string term, HashSet<long> postingList)
+        {
+            var termBytes = Encoding.UTF8.GetBytes(term);
+            var lengthOfTermRecordInBytes = sizeof(long) + sizeof(int) + termBytes.Length + sizeof(int) + (postingList.Count * sizeof(long));
+            var offsetOfNextTerm = ixStream.Position + lengthOfTermRecordInBytes;
+
+            await ixStream.WriteLongAsync(offsetOfNextTerm);
+            await ixStream.WriteIntAsync(termBytes.Length);
+            await ixStream.WriteAsync(termBytes, 0, termBytes.Length);
+            await ixStream.WriteIntAsync(postingList.Count);
+            
+            foreach (var entry in postingList.OrderBy(x => x))
+            {
+                await ixStream.WriteLongAsync(entry);
             }
         }
 
@@ -89,13 +201,21 @@ namespace SimpleFts
             return result;
         }
 
-        private IEnumerable<string> GetIndexFilePaths()
-        {
-            // TODO: check index integrity!
+        // TODO: check index integrity
 
+        private List<string> GetIndexFilePaths() => Directory.EnumerateFiles(_indexDir, "*.fix").ToList();
+
+        private FileStream OpenNextIndexFileForWrite()
+        {
+            var newIxFs = new FileStream(GetNextIndexFilePath(), FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
+            return newIxFs;
+        }
+        
+        private string GetNextIndexFilePath()
+        {
             var nextFileId = 1;
 
-            var existingFilePaths = Directory.EnumerateFiles(_indexDir, "*.fix").ToList();
+            var existingFilePaths = GetIndexFilePaths();
             if (existingFilePaths.Count != 0)
             {
                 nextFileId = existingFilePaths
@@ -103,13 +223,8 @@ namespace SimpleFts
                     .Select(fname => int.Parse(fname))
                     .Max() + 1;
             }
-            
-            foreach (var existingFilePath in existingFilePaths)
-            {
-                yield return existingFilePath;
-            }
 
-            yield return $"{nextFileId}.fix";
+            return Path.Combine(_indexDir, $"{nextFileId}.fix");
         }
     }
 }
