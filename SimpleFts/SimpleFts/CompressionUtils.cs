@@ -39,19 +39,5 @@ namespace SimpleFts
                 return buffer;
             }
         }
-
-        private static async Task<long> ReadLong(this Stream stream)
-        {
-            var buffer = new byte[sizeof(long)];
-            await stream.ReadAsync(buffer, 0, buffer.Length);
-
-            return BitConverter.ToInt64(buffer, 0);
-        }
-
-        private static async Task WriteLong(this Stream stream, long val)
-        {
-            var bytes = BitConverter.GetBytes(val);
-            await stream.WriteAsync(bytes, 0, bytes.Length);
-        }
     }
 }

@@ -8,12 +8,12 @@ namespace SimpleFts
     public class Database : IDisposable
     {
         private readonly DataFile _dataFile;
-        private readonly GlobalIndex _index;
+        private readonly IndexRoot _index;
 
         public Database(string dataDir, string indexDir)
         {
             _dataFile = new DataFile(dataDir);
-            _index = new GlobalIndex(indexDir);
+            _index = new IndexRoot(indexDir);
         }
 
         public async Task AddDocument(Document doc)
