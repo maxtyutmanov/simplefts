@@ -57,11 +57,18 @@ namespace SimpleFts
 
         public IEnumerable<long> Search(string term)
         {
+            // multiple inverted index entries may point to the same chunks in datafile, hence the deduplication
+            var seenEntries = new HashSet<long>();
+
             foreach (var indexFilePath in GetIndexFilePaths())
             {
                 foreach (var postingListEntry in SearchIndexFile(term, indexFilePath))
                 {
-                    yield return postingListEntry;
+                    if (!seenEntries.Contains(postingListEntry))
+                    {
+                        yield return postingListEntry;
+                        seenEntries.Add(postingListEntry);
+                    }
                 }
             }
         }

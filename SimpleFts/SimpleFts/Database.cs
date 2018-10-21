@@ -22,6 +22,27 @@ namespace SimpleFts
             await _index.AddDocument(doc, chunkOffset);
         }
 
+        public async Task Commit()
+        {
+            await _index.Commit();
+        }
+
+        public IEnumerable<Document> Search(SearchQuery query)
+        {
+            var chunkOffsets = _index.Search(query);
+            var grep = new Grep();
+
+            foreach (var chunkOffset in chunkOffsets)
+            {
+                var chunk = _dataFile.GetChunk(chunkOffset).GetAwaiter().GetResult();
+                
+                foreach (var matchingDoc in grep.Filter(query, chunk))
+                {
+                    yield return matchingDoc;
+                }
+            }
+        }
+
         public void Dispose()
         {
             _dataFile.Dispose();

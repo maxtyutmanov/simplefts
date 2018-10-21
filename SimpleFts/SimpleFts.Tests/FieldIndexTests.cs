@@ -12,7 +12,7 @@ namespace SimpleFts.Tests
 {
     public class FieldIndexTests
     {
-        private const string RootIndexDir = @".\index_root";
+        private const string RootIndexDir = @".\FieldIndexTests\index_root";
 
         private FieldIndex _fix;
 

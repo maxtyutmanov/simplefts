@@ -12,7 +12,7 @@ namespace SimpleFts.Tests
 {
     public class DataFileTests : IDisposable
     {
-        private const string DataDir = @".\datadir";
+        private const string DataDir = @".\DataFileTests\datadir";
 
         private DataFile _df;
 

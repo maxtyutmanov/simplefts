@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -29,6 +30,18 @@ namespace SimpleFts
                     await fieldIndex.AddTerm(term, dataFileOffset);
                 }
             }
+        }
+
+        public IEnumerable<long> Search(SearchQuery query)
+        {
+            var fix = GetFieldIndex(query.Field);
+            return fix.Search(query.Term);
+        }
+
+        public async Task Commit()
+        {
+            var commitTasks = _fieldIndexes.Values.Select(fix => fix.Commit());
+            await Task.WhenAll(commitTasks);
         }
 
         private Dictionary<string, FieldIndex> InitFieldIndexes()

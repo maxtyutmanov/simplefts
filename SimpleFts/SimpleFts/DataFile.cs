@@ -104,9 +104,9 @@ namespace SimpleFts
                 using (var sr = new StreamReader(buffer, Encoding.UTF8, false, 1024, true))
                 using (var jr = new JsonTextReader(sr))
                 {
-                    while (!sr.EndOfStream)
+                    jr.SupportMultipleContent = true;
+                    while (await jr.ReadAsync().ConfigureAwait(false))
                     {
-                        await jr.ReadAsync().ConfigureAwait(false);
                         var doc = serializer.Deserialize<Document>(jr);
                         result.Add(doc);
                     }
@@ -132,9 +132,9 @@ namespace SimpleFts
                 using (var sr = new StreamReader(ms, Encoding.UTF8, false, 1024, true))
                 using (var jr = new JsonTextReader(sr))
                 {
-                    while (!sr.EndOfStream)
+                    jr.SupportMultipleContent = true;
+                    while (await jr.ReadAsync().ConfigureAwait(false))
                     {
-                        await jr.ReadAsync().ConfigureAwait(false);
                         var doc = serializer.Deserialize<Document>(jr);
                         result.Add(doc);
                     }
