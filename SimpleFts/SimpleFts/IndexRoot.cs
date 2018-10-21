@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,7 +10,7 @@ namespace SimpleFts
 {
     public class IndexRoot
     {
-        private readonly Dictionary<string, FieldIndex> _fieldIndexes;
+        private readonly ConcurrentDictionary<string, FieldIndex> _fieldIndexes;
         private readonly string _indexDir;
 
         public IndexRoot(string indexDir)
@@ -44,15 +45,15 @@ namespace SimpleFts
             await Task.WhenAll(commitTasks);
         }
 
-        private Dictionary<string, FieldIndex> InitFieldIndexes()
+        private ConcurrentDictionary<string, FieldIndex> InitFieldIndexes()
         {
-            var result = new Dictionary<string, FieldIndex>();
+            var result = new ConcurrentDictionary<string, FieldIndex>();
 
             foreach (var dir in Directory.EnumerateDirectories(_indexDir))
             {
                 var fieldName = Path.GetFileName(dir);
                 var fix = new FieldIndex(_indexDir, fieldName);
-                result.Add(fieldName, fix);
+                result.TryAdd(fieldName, fix);
             }
 
             return result;
@@ -66,7 +67,7 @@ namespace SimpleFts
 
         private FieldIndex GetFieldIndex(string fieldName)
         {
-            return _fieldIndexes.GetOrAdd(fieldName, () => new FieldIndex(_indexDir, fieldName));
+            return _fieldIndexes.GetOrAdd(fieldName, (existingFieldName) => new FieldIndex(_indexDir, fieldName));
         }
     }
 }
