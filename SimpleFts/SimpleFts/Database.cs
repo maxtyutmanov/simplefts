@@ -25,7 +25,6 @@ namespace SimpleFts
         public void Dispose()
         {
             _dataFile.Dispose();
-            _index.Dispose();
         }
     }
 }

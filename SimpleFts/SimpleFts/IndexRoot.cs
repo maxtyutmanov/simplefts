@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace SimpleFts
 {
-    public class IndexRoot : IDisposable
+    public class IndexRoot
     {
         private readonly Dictionary<string, FieldIndex> _fieldIndexes;
         private readonly string _indexDir;
@@ -31,34 +31,15 @@ namespace SimpleFts
             }
         }
 
-        public void Dispose()
-        {
-            foreach (var fix in _fieldIndexes.Values)
-            {
-                fix.Dispose();
-            }
-        }
-
         private Dictionary<string, FieldIndex> InitFieldIndexes()
         {
             var result = new Dictionary<string, FieldIndex>();
 
-            try
+            foreach (var dir in Directory.EnumerateDirectories(_indexDir))
             {
-                foreach (var dir in Directory.EnumerateDirectories(_indexDir))
-                {
-                    var fieldName = Path.GetFileName(dir);
-                    var fix = new FieldIndex(_indexDir, fieldName);
-                    result.Add(fieldName, fix);
-                }
-            }
-            catch (Exception)
-            {
-                foreach (var fix in result.Values)
-                {
-                    fix.Dispose();
-                }
-                throw;
+                var fieldName = Path.GetFileName(dir);
+                var fix = new FieldIndex(_indexDir, fieldName);
+                result.Add(fieldName, fix);
             }
 
             return result;
