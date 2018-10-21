@@ -25,6 +25,7 @@ namespace SimpleFts
         private readonly SemaphoreSlim _addLock = new SemaphoreSlim(1, 1);
 
         private int _docsInCurrentChunk = 0;
+        private long _currentLengthOfMain;
 
         public DataFile(string dataDir, int chunkSize = DefaultChunkSize)
         {
@@ -39,6 +40,7 @@ namespace SimpleFts
             _chunkSize = chunkSize;
 
             _docsInCurrentChunk = ReadDocumentsFromBuffer().Result.Count;
+            _currentLengthOfMain = _main.Length;
         }
 
         public async Task<long> AddDocumentAndGetChunkOffset(Document d)
@@ -49,10 +51,7 @@ namespace SimpleFts
 
             try
             {
-                if (_docsInCurrentChunk == _chunkSize)
-                {
-                    await FlushBuffer().ConfigureAwait(false);
-                }
+                await FlushBufferIfOverflown().ConfigureAwait(false);
 
                 var docStr = JsonConvert.SerializeObject(d);
                 var docBytes = Encoding.UTF8.GetBytes(docStr);
@@ -80,44 +79,47 @@ namespace SimpleFts
 
         public async Task<List<Document>> GetChunk(long chunkOffset)
         {
-            if (chunkOffset >= _main.Length)
+            // check whether the chunk by the requested offset is in main file or in buffer
+            if (chunkOffset >= _currentLengthOfMain)
             {
-                // this chunk is not yet flushed from the buffer into the main data file
-                return await ReadDocumentsFromBuffer().ConfigureAwait(false);
+                await _bufferLock.WaitAsync().ConfigureAwait(false);
+
+                try
+                {
+                    // we have to double-check this: what if it WAS in buffer, but the buffer was flushed immediately after our check
+                    if (chunkOffset >= _currentLengthOfMain)
+                    {
+                        // this chunk is not yet flushed from the buffer into the main data file
+                        return await ReadDocumentsFromBuffer().ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _bufferLock.Release();
+                }
             }
-            else
-            {
-                return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
-            }
+
+            return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
         }
 
         private async Task<List<Document>> ReadDocumentsFromBuffer()
         {
-            await _bufferLock.WaitAsync().ConfigureAwait(false);
+            var serializer = new JsonSerializer();
+            var result = new List<Document>(_docsInCurrentChunk);
 
-            try
+            using (var buffer = new FileStream(_bufferPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var sr = new StreamReader(buffer, Encoding.UTF8, false, 1024, true))
+            using (var jr = new JsonTextReader(sr))
             {
-                var serializer = new JsonSerializer();
-                var result = new List<Document>(_docsInCurrentChunk);
-
-                using (var buffer = new FileStream(_bufferPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                using (var sr = new StreamReader(buffer, Encoding.UTF8, false, 1024, true))
-                using (var jr = new JsonTextReader(sr))
+                jr.SupportMultipleContent = true;
+                while (await jr.ReadAsync().ConfigureAwait(false))
                 {
-                    jr.SupportMultipleContent = true;
-                    while (await jr.ReadAsync().ConfigureAwait(false))
-                    {
-                        var doc = serializer.Deserialize<Document>(jr);
-                        result.Add(doc);
-                    }
+                    var doc = serializer.Deserialize<Document>(jr);
+                    result.Add(doc);
                 }
+            }
 
-                return result;
-            }
-            finally
-            {
-                _bufferLock.Release();
-            }
+            return result;
         }
 
         private async Task<List<Document>> ReadDocumentsFromMain(long chunkOffset)
@@ -144,27 +146,39 @@ namespace SimpleFts
             }
         }
 
+        private async Task FlushBufferIfOverflown()
+        {
+            if (_docsInCurrentChunk >= _chunkSize)
+            {
+                await _bufferLock.WaitAsync().ConfigureAwait(false);
+
+                try
+                {
+                    if (_docsInCurrentChunk >= _chunkSize)
+                    {
+                        await FlushBuffer().ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _bufferLock.Release();
+                }
+            }
+        }
+
         private async Task FlushBuffer()
         {
-            await _bufferLock.WaitAsync().ConfigureAwait(false);
-
-            try
+            if (_buffer.Length == 0)
             {
-                if (_buffer.Length == 0)
-                {
-                    return;
-                }
+                return;
+            }
 
-                await _buffer.CompressChunkAndAppendTo(_main).ConfigureAwait(false);
-                await _main.FlushAsync().ConfigureAwait(false);
-                _docsInCurrentChunk = 0;
-                // truncate buffer
-                _buffer.SetLength(0);
-            }
-            finally
-            {
-                _bufferLock.Release();
-            }
+            await _buffer.CompressChunkAndAppendTo(_main).ConfigureAwait(false);
+            await _main.FlushAsync().ConfigureAwait(false);
+            _currentLengthOfMain = _main.Length;
+            _docsInCurrentChunk = 0;
+            // truncate buffer
+            _buffer.SetLength(0);
         }
     }
 }
