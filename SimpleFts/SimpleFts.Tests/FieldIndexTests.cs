@@ -44,14 +44,26 @@ namespace SimpleFts.Tests
 
             await _fix.Commit();
 
-            _fix.Search("term of document 1", CancellationToken.None)
+            _fix.Search("term of document 1")
                 .Should().BeEquivalentTo(new[] { 1 });
-            _fix.Search("another term of document 1", CancellationToken.None)
+            _fix.Search("another term of document 1")
                 .Should().BeEquivalentTo(new[] { 1 });
-            _fix.Search("term of document 2", CancellationToken.None)
+            _fix.Search("term of document 2")
                 .Should().BeEquivalentTo(new[] { 2 });
-            _fix.Search("another term of document 2", CancellationToken.None)
+            _fix.Search("another term of document 2")
                 .Should().BeEquivalentTo(new[] { 2 });
+        }
+
+        [Fact]
+        public async Task QueryNonExistingTerm_ShouldGetEmptyResultSet()
+        {
+            _fix = new FieldIndex(RootIndexDir, "text");
+
+            await _fix.AddTerm("term of document 1", 1);
+
+            await _fix.Commit();
+
+            _fix.Search("unknown term").Should().BeEmpty();
         }
     }
 }

@@ -10,8 +10,6 @@ namespace SimpleFts
 {
     public class FieldIndex : IDisposable
     {
-        private const int EndOfIndexMarker = -1;
-
         // We don't bother with exact calculation of the overhead required to store another long value in the hashset.
         // Here we assume it is size of long value multiplied by some factor.
         private const int PostingListEntrySizeScore = sizeof(long) * 4;
@@ -58,34 +56,26 @@ namespace SimpleFts
             _indexFiles.ForEach(ixf => ixf.Dispose());
         }
 
-        public IEnumerable<long> Search(string term, CancellationToken ct)
+        public IEnumerable<long> Search(string term)
         {
             foreach (var indexFilePath in GetIndexFilePaths())
             {
-                if (ct.IsCancellationRequested)
-                    break;
-
-                foreach (var postingListEntry in SearchIndexFile(term, indexFilePath, ct))
+                foreach (var postingListEntry in SearchIndexFile(term, indexFilePath))
                 {
-                    if (ct.IsCancellationRequested)
-                        break;
-
                     yield return postingListEntry;
                 }
             }
         }
 
-        private IEnumerable<long> SearchIndexFile(string targetTerm, string indexFilePath, CancellationToken ct)
+        private IEnumerable<long> SearchIndexFile(string targetTerm, string indexFilePath)
         {
             var comparer = StringComparer.OrdinalIgnoreCase;
 
             using (var ixFile = new FileStream(indexFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                while (!ct.IsCancellationRequested)
+                while (ixFile.NotEof())
                 {
                     var nextTermOffset = ixFile.ReadLong();
-                    if (nextTermOffset == EndOfIndexMarker)
-                        break;
 
                     var termLengthInBytes = ixFile.ReadInt();
                     var term = ixFile.ReadUtf8String(termLengthInBytes);
@@ -108,9 +98,6 @@ namespace SimpleFts
 
                         for (int i = 0; i < postingListLength; i++)
                         {
-                            if (ct.IsCancellationRequested)
-                                break;
-
                             var entry = ixFile.ReadLong();
                             yield return entry;
                         }
@@ -144,7 +131,6 @@ namespace SimpleFts
                 }
 
                 // termination sign
-                await newIxFile.WriteIntAsync(EndOfIndexMarker);
                 await newIxFile.FlushAsync();
                 _indexFiles.Add(newIxFile);
 

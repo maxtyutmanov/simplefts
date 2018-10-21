@@ -68,5 +68,10 @@ namespace SimpleFts
             stream.Read(buffer, 0, buffer.Length);
             return Encoding.UTF8.GetString(buffer);
         }
+
+        public static bool NotEof(this Stream stream)
+        {
+            return stream.Position < stream.Length;
+        }
     }
 }
