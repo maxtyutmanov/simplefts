@@ -53,7 +53,7 @@ namespace SimpleFts
             {
                 var fieldName = Path.GetFileName(dir);
                 var fix = new FieldIndex(_indexDir, fieldName);
-                result.TryAdd(fieldName, new Lazy<FieldIndex>(fix));
+                result.TryAdd(fieldName, new Lazy<FieldIndex>(() => fix));
             }
 
             return result;

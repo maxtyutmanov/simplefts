@@ -35,7 +35,9 @@ namespace SimpleFts
             _mainPath = Path.Combine(dataDir, "main.dat");
 
             _buffer = new FileStream(_bufferPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            _buffer.Position = _buffer.Length;
             _main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+            _main.Position = _main.Length;
 
             _chunkSize = chunkSize;
 

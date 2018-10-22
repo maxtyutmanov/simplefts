@@ -30,12 +30,18 @@ namespace SimpleFts
         public static async Task<byte[]> GetDecompressedChunk(this Stream stream, long chunkOffset)
         {
             stream.Position = chunkOffset;
-            long originalLenght = await stream.ReadLongAsync();
+            long originalLength = await stream.ReadLongAsync();
 
             using (var gzip = new GZipStream(stream, CompressionMode.Decompress, true))
             {
-                var buffer = new byte[originalLenght];
-                await gzip.ReadAsync(buffer, 0, buffer.Length);
+                var buffer = new byte[originalLength];
+                var bytesRead = 0;
+                while (bytesRead < originalLength)
+                {
+                    var bytesReadThisTime = await gzip.ReadAsync(buffer, bytesRead, buffer.Length - bytesRead);
+                    bytesRead += bytesReadThisTime;
+                }
+                
                 return buffer;
             }
         }
