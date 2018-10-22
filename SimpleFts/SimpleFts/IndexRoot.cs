@@ -10,7 +10,7 @@ namespace SimpleFts
 {
     public class IndexRoot
     {
-        private readonly ConcurrentDictionary<string, FieldIndex> _fieldIndexes;
+        private readonly ConcurrentDictionary<string, Lazy<FieldIndex>> _fieldIndexes;
         private readonly string _indexDir;
 
         public IndexRoot(string indexDir)
@@ -41,19 +41,19 @@ namespace SimpleFts
 
         public async Task Commit()
         {
-            var commitTasks = _fieldIndexes.Values.Select(fix => fix.Commit());
+            var commitTasks = _fieldIndexes.Values.Select(fix => fix.Value.Commit());
             await Task.WhenAll(commitTasks);
         }
 
-        private ConcurrentDictionary<string, FieldIndex> InitFieldIndexes()
+        private ConcurrentDictionary<string, Lazy<FieldIndex>> InitFieldIndexes()
         {
-            var result = new ConcurrentDictionary<string, FieldIndex>();
+            var result = new ConcurrentDictionary<string, Lazy<FieldIndex>>();
 
             foreach (var dir in Directory.EnumerateDirectories(_indexDir))
             {
                 var fieldName = Path.GetFileName(dir);
                 var fix = new FieldIndex(_indexDir, fieldName);
-                result.TryAdd(fieldName, fix);
+                result.TryAdd(fieldName, new Lazy<FieldIndex>(fix));
             }
 
             return result;
@@ -67,7 +67,11 @@ namespace SimpleFts
 
         private FieldIndex GetFieldIndex(string fieldName)
         {
-            return _fieldIndexes.GetOrAdd(fieldName, (existingFieldName) => new FieldIndex(_indexDir, fieldName));
+            var lazy = _fieldIndexes.GetOrAdd(
+                fieldName, 
+                (existingFieldName) => new Lazy<FieldIndex>(() => new FieldIndex(_indexDir, fieldName)));
+
+            return lazy.Value;
         }
     }
 }
