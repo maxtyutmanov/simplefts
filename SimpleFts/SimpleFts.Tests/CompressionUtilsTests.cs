@@ -1,5 +1,4 @@
 using FluentAssertions;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,11 +15,13 @@ namespace SimpleFts.Tests
         {
             var sourceStr = "TEST this is TEST";
 
+            var utils = new CompressionUtils();
+
             using (var source = GetStreamWithContents(sourceStr))
             using (var target = new MemoryStream())
             {
-                await source.CompressChunkAndAppendTo(target);
-                var bytes = await target.GetDecompressedChunk(0);
+                await utils.CopyWithCompression(source, target);
+                var bytes = (await utils.ReadWithDecompression(target, 0)).ToArray();
                 var decompressedStr = Encoding.GetString(bytes);
 
                 sourceStr.Should().BeEquivalentTo(decompressedStr);
@@ -33,18 +34,20 @@ namespace SimpleFts.Tests
             var sourceStr1 = "TEST this is TEST";
             var sourceStr2 = "THIS IS another TEST";
 
+            var utils = new CompressionUtils();
+
             using (var source1 = GetStreamWithContents(sourceStr1))
             using (var source2 = GetStreamWithContents(sourceStr2))
             using (var target = new MemoryStream())
             {
                 var chunk1Position = 0;
-                await source1.CompressChunkAndAppendTo(target);
+                await utils.CopyWithCompression(source1, target);
                 var chunk2Position = target.Position;
-                await source2.CompressChunkAndAppendTo(target);
+                await utils.CopyWithCompression(source2, target);
 
-                var decompressedBytes1 = await target.GetDecompressedChunk(chunk1Position);
+                var decompressedBytes1 = (await utils.ReadWithDecompression(target, chunk1Position)).ToArray();
                 var decompressedStr1 = Encoding.GetString(decompressedBytes1);
-                var decompressedBytes2 = await target.GetDecompressedChunk(chunk2Position);
+                var decompressedBytes2 = (await utils.ReadWithDecompression(target, chunk2Position)).ToArray();
                 var decompressedStr2 = Encoding.GetString(decompressedBytes2);
 
                 sourceStr1.Should().Be(decompressedStr1);

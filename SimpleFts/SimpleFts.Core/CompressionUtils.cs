@@ -7,9 +7,12 @@ using System.Threading.Tasks;
 
 namespace SimpleFts
 {
-    public static class CompressionUtils
+    public class CompressionUtils
     {
-        public static async Task CompressChunkAndAppendTo(this Stream source, Stream target)
+        private byte[] _readBuffer = new byte[100 * 1024];
+        private byte[] _originalLengthBuffer = new byte[sizeof(long)];
+
+        public async Task CopyWithCompression(Stream source, Stream target)
         {
             source.Position = 0;
 
@@ -27,22 +30,27 @@ namespace SimpleFts
             }
         }
 
-        public static async Task<byte[]> GetDecompressedChunk(this Stream stream, long chunkOffset)
+        public async Task<ArraySegment<byte>> ReadWithDecompression(Stream source, long chunkOffset)
         {
-            stream.Position = chunkOffset;
-            long originalLength = await stream.ReadLongAsync();
+            source.Position = chunkOffset;
+            long originalLength = await source.ReadLongAsync();
 
-            using (var gzip = new GZipStream(stream, CompressionMode.Decompress, true))
+            if (originalLength > _readBuffer.Length)
             {
-                var buffer = new byte[originalLength];
+                // grow buffer
+                _readBuffer = new byte[originalLength];
+            }
+
+            using (var gzip = new GZipStream(source, CompressionMode.Decompress, true))
+            {
                 var bytesRead = 0;
                 while (bytesRead < originalLength)
                 {
-                    var bytesReadThisTime = await gzip.ReadAsync(buffer, bytesRead, buffer.Length - bytesRead);
+                    var bytesReadThisTime = await gzip.ReadAsync(_readBuffer, bytesRead, (int)originalLength - bytesRead);
                     bytesRead += bytesReadThisTime;
                 }
                 
-                return buffer;
+                return new ArraySegment<byte>(_readBuffer, 0, (int)originalLength);
             }
         }
     }

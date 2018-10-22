@@ -126,13 +126,15 @@ namespace SimpleFts
 
         private async Task<List<Document>> ReadDocumentsFromMain(long chunkOffset)
         {
+            var compUtils = new CompressionUtils();
+
             using (var main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite))
             {
                 var result = new List<Document>(_chunkSize);
                 var serializer = new JsonSerializer();
-                var chunkBytes = await main.GetDecompressedChunk(chunkOffset).ConfigureAwait(false);
+                var chunk = await compUtils.ReadWithDecompression(main, chunkOffset).ConfigureAwait(false);
 
-                using (var ms = new MemoryStream(chunkBytes))
+                using (var ms = new MemoryStream(chunk.Array, chunk.Offset, chunk.Count))
                 using (var sr = new StreamReader(ms, Encoding.UTF8, false, 1024, true))
                 using (var jr = new JsonTextReader(sr))
                 {
@@ -170,12 +172,14 @@ namespace SimpleFts
 
         private async Task FlushBuffer()
         {
+            var compUtils = new CompressionUtils();
+
             if (_buffer.Length == 0)
             {
                 return;
             }
 
-            await _buffer.CompressChunkAndAppendTo(_main).ConfigureAwait(false);
+            await compUtils.CopyWithCompression(_buffer, _main).ConfigureAwait(false);
             await _main.FlushAsync().ConfigureAwait(false);
             _currentLengthOfMain = _main.Length;
             _docsInCurrentChunk = 0;
