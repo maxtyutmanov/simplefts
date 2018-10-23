@@ -7,9 +7,9 @@ namespace SimpleFts.LoadTests
 {
     class Program
     {
-        const string RootIndexDir = @".\index_root";
-        const string DataDir = @".\datadir";
-        const int TestSetSize = 10000;
+        const string RootIndexDir = @"E:\work\simplefts_store\index_root";
+        const string DataDir = @"E:\work\simplefts_store\datadir";
+        const int TestSetSize = 5000;
 
         static Random _rand = new Random();
 

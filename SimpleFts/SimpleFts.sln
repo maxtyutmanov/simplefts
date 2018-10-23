@@ -7,9 +7,12 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SimpleFts.Tests", "SimpleFt
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SimpleFts.Core", "SimpleFts.Core\SimpleFts.Core.csproj", "{8E715D15-A5A9-438F-8A2D-A9B487AF2409}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleFts.LoadTests", "SimpleFts.LoadTests\SimpleFts.LoadTests.csproj", "{BC4B99C8-FAB9-4AD4-84B9-A9CE54DE57D3}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SimpleFts.LoadTests", "SimpleFts.LoadTests\SimpleFts.LoadTests.csproj", "{BC4B99C8-FAB9-4AD4-84B9-A9CE54DE57D3}"
 EndProject
 Global
+	GlobalSection(Performance) = preSolution
+		HasPerformanceSessions = true
+	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
