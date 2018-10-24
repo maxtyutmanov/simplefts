@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SimpleFts.Core.Utils;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -11,7 +12,13 @@ namespace SimpleFts
 
         public IEnumerable<Document> Filter(SearchQuery query, IEnumerable<Document> docs)
         {
-            return docs.Where(doc => IsMatch(query, doc));
+            using (Measured.Operation("grep_filter"))
+            {
+                foreach (var matchingDoc in docs.Where(doc => IsMatch(query, doc)))
+                {
+                    yield return matchingDoc;
+                }
+            }
         }
 
         private bool IsMatch(SearchQuery query, Document doc)

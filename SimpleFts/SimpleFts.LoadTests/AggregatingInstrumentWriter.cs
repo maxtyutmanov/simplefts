@@ -20,7 +20,7 @@ namespace SimpleFts.LoadTests
         {
             foreach (var pair in _opStats)
             {
-                writer.WriteLine($"{pair.Key}: {TimeSpan.FromTicks(pair.Value)}");
+                writer.WriteLine($"[Instrumentation] {pair.Key}: {TimeSpan.FromTicks(pair.Value)}");
             }
         }
     }
