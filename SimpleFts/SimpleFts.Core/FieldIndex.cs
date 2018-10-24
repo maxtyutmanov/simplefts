@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using InMemoryIndex = System.Collections.Concurrent.ConcurrentDictionary<string, SimpleFts.Utils.ConcurrentHashSet<long>>;
 using SimpleFts.Utils;
+using SimpleFts.Core.Utils;
 
 namespace SimpleFts
 {
@@ -32,25 +33,10 @@ namespace SimpleFts
 
         public async Task AddTerm(string term, long dataFileOffset)
         {
-            _inMemoryIx.AddOrUpdate(
-                term,
-                (key) =>
-                {
-                    // we roughly estimate the memory required to store a string as number of its characters multiplied by 2
-                    Interlocked.Add(ref _memoryPressureScore, term.Length * 2 + PostingListEntrySizeScore);
-
-                    var hs = new ConcurrentHashSet<long>();
-                    hs.Add(dataFileOffset);
-                    return hs;
-                },
-                (key, postingList) =>
-                {
-                    if (postingList.Add(dataFileOffset))
-                    {
-                        Interlocked.Add(ref _memoryPressureScore, PostingListEntrySizeScore);
-                    }
-                    return postingList;
-                });
+            using (Measured.Operation("add_term_to_in_memory_ix"))
+            {
+                AddTermToInMemoryIndex(term, dataFileOffset);
+            }
 
             await CommitIfHighMemoryPressure();
         }
@@ -87,38 +73,64 @@ namespace SimpleFts
             }
         }
 
+        private void AddTermToInMemoryIndex(string term, long dataFileOffset)
+        {
+            _inMemoryIx.AddOrUpdate(
+                term,
+                (key) =>
+                {
+                    // we roughly estimate the memory required to store a string as number of its characters multiplied by 2
+                    Interlocked.Add(ref _memoryPressureScore, term.Length * 2 + PostingListEntrySizeScore);
+
+                    var hs = new ConcurrentHashSet<long>();
+                    hs.Add(dataFileOffset);
+                    return hs;
+                },
+                (key, postingList) =>
+                {
+                    if (postingList.Add(dataFileOffset))
+                    {
+                        Interlocked.Add(ref _memoryPressureScore, PostingListEntrySizeScore);
+                    }
+                    return postingList;
+                });
+        }
+
         private async Task CommitInternal()
         {
-            // detaching old in memory index so that all new updates will go to the new 
-            // in memory index while the old one is being committed to disk
-            var newInMemoryIx = new InMemoryIndex();
-            var oldInMemoryIx = Interlocked.Exchange(ref _inMemoryIx, newInMemoryIx);
-            Interlocked.Exchange(ref _memoryPressureScore, 0);
-
-            if (oldInMemoryIx.IsEmpty)
+            using (Measured.Operation("commit_index_file"))
             {
-                // nothing to commit
-                return;
-            }
+                // detaching old in memory index so that all new updates will go to the new 
+                // in memory index while the old one is being committed to disk
+                var newInMemoryIx = new InMemoryIndex();
+                var oldInMemoryIx = Interlocked.Exchange(ref _inMemoryIx, newInMemoryIx);
+                Interlocked.Exchange(ref _memoryPressureScore, 0);
 
-            /*
-             * Index file structure:
-             * 
-             * <file offset (in bytes) of term 2> <length of term 1 representation (in bytes)> <term 1 UTF-8 bytes> <number of items in the posting list 1> <item 1 of the posting list 1> ... <item N of the posting list 1>
-             * <file offset (in bytes) of term 3> <length of term 2 representation (in bytes)> <term 2 UTF-8 bytes> <number of items in the posting list 2> <item 2 of the posting list 2> ... <item N of the posting list 2>
-             * ...
-             * (this goes on for all terms in the index)
-             * <end-of-index marker>
-             */
-
-            using (var newIxFile = OpenNextIndexFileForWrite())
-            {
-                foreach (var termWithPostingList in oldInMemoryIx.OrderBy(x => x.Key))
+                if (oldInMemoryIx.IsEmpty)
                 {
-                    await WriteTermAndPostingList(newIxFile, termWithPostingList.Key, termWithPostingList.Value);
+                    // nothing to commit
+                    return;
                 }
 
-                await newIxFile.FlushAsync();
+                /*
+                 * Index file structure:
+                 * 
+                 * <file offset (in bytes) of term 2> <length of term 1 representation (in bytes)> <term 1 UTF-8 bytes> <number of items in the posting list 1> <item 1 of the posting list 1> ... <item N of the posting list 1>
+                 * <file offset (in bytes) of term 3> <length of term 2 representation (in bytes)> <term 2 UTF-8 bytes> <number of items in the posting list 2> <item 2 of the posting list 2> ... <item N of the posting list 2>
+                 * ...
+                 * (this goes on for all terms in the index)
+                 * <end-of-index marker>
+                 */
+
+                using (var newIxFile = OpenNextIndexFileForWrite())
+                {
+                    foreach (var termWithPostingList in oldInMemoryIx.OrderBy(x => x.Key))
+                    {
+                        await WriteTermAndPostingList(newIxFile, termWithPostingList.Key, termWithPostingList.Value);
+                    }
+
+                    await newIxFile.FlushAsync();
+                }
             }
         }
 
@@ -147,6 +159,7 @@ namespace SimpleFts
         {
             var comparer = StringComparer.OrdinalIgnoreCase;
 
+            using (Measured.Operation("search_index_file"))
             using (var ixFile = new FileStream(indexFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
                 while (ixFile.NotEof())

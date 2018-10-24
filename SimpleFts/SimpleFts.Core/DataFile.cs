@@ -1,5 +1,6 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SimpleFts.Core.Utils;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -54,14 +55,7 @@ namespace SimpleFts
             try
             {
                 await FlushBufferIfOverflown().ConfigureAwait(false);
-
-                var docStr = JsonConvert.SerializeObject(d);
-                var docBytes = Encoding.UTF8.GetBytes(docStr);
-
-                await _buffer.WriteAsync(docBytes, 0, docBytes.Length).ConfigureAwait(false);
-                await _buffer.FlushAsync().ConfigureAwait(false);
-
-                ++_docsInCurrentChunk;
+                await AppendDocumentToBuffer(d).ConfigureAwait(false);
 
                 return _main.Length;
             }
@@ -104,11 +98,26 @@ namespace SimpleFts
             return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
         }
 
+        private async Task AppendDocumentToBuffer(Document d)
+        {
+            using (Measured.Operation("append_document_to_buffer"))
+            {
+                var docStr = JsonConvert.SerializeObject(d);
+                var docBytes = Encoding.UTF8.GetBytes(docStr);
+
+                await _buffer.WriteAsync(docBytes, 0, docBytes.Length).ConfigureAwait(false);
+                await _buffer.FlushAsync().ConfigureAwait(false);
+
+                ++_docsInCurrentChunk;
+            }
+        }
+
         private async Task<List<Document>> ReadDocumentsFromBuffer()
         {
             var serializer = new JsonSerializer();
             var result = new List<Document>(_docsInCurrentChunk);
 
+            using (Measured.Operation("read_documents_from_buffer"))
             using (var buffer = new FileStream(_bufferPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var sr = new StreamReader(buffer, Encoding.UTF8, false, 1024, true))
             using (var jr = new JsonTextReader(sr))
@@ -128,6 +137,7 @@ namespace SimpleFts
         {
             var compUtils = new CompressionUtils();
 
+            using (Measured.Operation("read_documents_from_buffer"))
             using (var main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite))
             {
                 var result = new List<Document>(_chunkSize);
@@ -172,19 +182,22 @@ namespace SimpleFts
 
         private async Task FlushBuffer()
         {
-            var compUtils = new CompressionUtils();
-
-            if (_buffer.Length == 0)
+            using (Measured.Operation("flush_datafile_buffer"))
             {
-                return;
-            }
+                var compUtils = new CompressionUtils();
 
-            await compUtils.CopyWithCompression(_buffer, _main).ConfigureAwait(false);
-            await _main.FlushAsync().ConfigureAwait(false);
-            _currentLengthOfMain = _main.Length;
-            _docsInCurrentChunk = 0;
-            // truncate buffer
-            _buffer.SetLength(0);
+                if (_buffer.Length == 0)
+                {
+                    return;
+                }
+
+                await compUtils.CopyWithCompression(_buffer, _main).ConfigureAwait(false);
+                await _main.FlushAsync().ConfigureAwait(false);
+                _currentLengthOfMain = _main.Length;
+                _docsInCurrentChunk = 0;
+                // truncate buffer
+                _buffer.SetLength(0);
+            }
         }
     }
 }

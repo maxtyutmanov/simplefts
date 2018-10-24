@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SimpleFts.Core.Utils;
+using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
@@ -9,12 +10,15 @@ namespace SimpleFts.LoadTests
     {
         const string RootIndexDir = @"E:\work\simplefts_store\index_root";
         const string DataDir = @"E:\work\simplefts_store\datadir";
-        const int TestSetSize = 5000;
+        const int TestSetSize = 1500;
 
         static Random _rand = new Random();
 
         static async Task Main(string[] args)
         {
+            var instrumentWriter = new AggregatingInstrumentWriter();
+            Measured.Initialize(instrumentWriter);
+
             var docs = Enumerable.Range(1, TestSetSize).Select(id => GenerateRandomDocument(id));
 
             using (var db = new Database(DataDir, RootIndexDir))
@@ -33,6 +37,7 @@ namespace SimpleFts.LoadTests
                 await db.Commit();
 
                 Console.WriteLine("Finished adding documents in {0}", sw.Elapsed);
+                instrumentWriter.WriteStats(Console.Out);
 
                 counter = 0;
                 sw.Restart();
@@ -61,6 +66,7 @@ namespace SimpleFts.LoadTests
                 }
 
                 Console.WriteLine("Finished all searches in {0}", sw.Elapsed);
+                instrumentWriter.WriteStats(Console.Out);
             }
 
             Console.ReadLine();
