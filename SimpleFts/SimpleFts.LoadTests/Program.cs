@@ -2,6 +2,7 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SimpleFts.LoadTests
@@ -10,11 +11,75 @@ namespace SimpleFts.LoadTests
     {
         const string RootIndexDir = @"E:\work\simplefts_store\index_root";
         const string DataDir = @"E:\work\simplefts_store\datadir";
-        const int TestSetSize = 1500;
+        const int TestSetSize = 5000;
+        const int BatchSize = 128;
 
         static Random _rand = new Random();
 
         static async Task Main(string[] args)
+        {
+            await TestWithBatching();
+        }
+
+        static async Task TestWithBatching()
+        {
+            var instrumentWriter = new AggregatingInstrumentWriter();
+            Measured.Initialize(instrumentWriter);
+
+            var docs = Enumerable.Range(1, TestSetSize).Select(id => GenerateRandomDocument(id));
+
+            using (var db = new Database(DataDir, RootIndexDir))
+            {
+                var counter = 0;
+                var sw = Stopwatch.StartNew();
+                foreach (var docsBatch in docs.GetByBatches(BatchSize))
+                {
+                    await db.AddDocumentsBatch(docsBatch, CancellationToken.None);
+                    if (++counter % 10 == 0)
+                    {
+                        Console.WriteLine("Added {0} documents to the DB in {1}", counter * BatchSize, sw.Elapsed);
+                    }
+                }
+
+                await db.Commit();
+
+                Console.WriteLine("Finished adding documents in {0}", sw.Elapsed);
+                instrumentWriter.WriteStats(Console.Out);
+
+                counter = 0;
+                sw.Restart();
+                foreach (var id in Enumerable.Range(1, TestSetSize))
+                {
+                    var foundDocs = db.Search(new SearchQuery()
+                    {
+                        Field = "id",
+                        Term = id.ToString()
+                    }).ToArray();
+
+                    if (foundDocs.Length == 0)
+                    {
+                        Console.WriteLine("Document with id={0} wasn't found in the DB", id);
+                    }
+
+                    if (foundDocs.Length > 1)
+                    {
+                        Console.WriteLine("There are {0} duplicate documents with id {1}", foundDocs.Length, id);
+                    }
+
+                    if (++counter % 1000 == 0)
+                    {
+                        Console.WriteLine("Performed {0} searched in the database in {1}", counter, sw.Elapsed);
+                    }
+                }
+
+                Console.WriteLine("Finished all searches in {0}", sw.Elapsed);
+                instrumentWriter.WriteStats(Console.Out);
+            }
+
+            Console.ReadLine();
+        }
+
+        static async Task TestWithoutBatching()
         {
             var instrumentWriter = new AggregatingInstrumentWriter();
             Measured.Initialize(instrumentWriter);

@@ -48,6 +48,11 @@ namespace SimpleFts
 
         public async Task<long> AddDocumentAndGetChunkOffset(Document d)
         {
+            return await AddDocumentsAndGetChunkOffset(new List<Document>() { d }, CancellationToken.None);
+        }
+
+        public async Task<long> AddDocumentsAndGetChunkOffset(IEnumerable<Document> documents, CancellationToken ct)
+        {
             // we don't allow adding documents in parallel (it doesn't make sense anyway because of IO involved)
 
             await _addLock.WaitAsync().ConfigureAwait(false);
@@ -55,7 +60,7 @@ namespace SimpleFts
             try
             {
                 await FlushBufferIfOverflown().ConfigureAwait(false);
-                await AppendDocumentToBuffer(d).ConfigureAwait(false);
+                await AppendDocumentsToBuffer(documents, ct).ConfigureAwait(false);
 
                 return _main.Length;
             }
@@ -98,17 +103,22 @@ namespace SimpleFts
             return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
         }
 
-        private async Task AppendDocumentToBuffer(Document d)
+        private async Task AppendDocumentsToBuffer(IEnumerable<Document> docs, CancellationToken ct)
         {
             using (Measured.Operation("append_document_to_buffer"))
             {
-                var docStr = JsonConvert.SerializeObject(d);
-                var docBytes = Encoding.UTF8.GetBytes(docStr);
+                // TODO: what if we crash in the middle of the foreach loop?
+                foreach (var d in docs)
+                {
+                    ct.ThrowIfCancellationRequested();
 
-                await _buffer.WriteAsync(docBytes, 0, docBytes.Length).ConfigureAwait(false);
+                    var docStr = JsonConvert.SerializeObject(d);
+                    var docBytes = Encoding.UTF8.GetBytes(docStr);
+                    await _buffer.WriteAsync(docBytes, 0, docBytes.Length, ct).ConfigureAwait(false);
+                    ++_docsInCurrentChunk;
+                }
+
                 await _buffer.FlushAsync().ConfigureAwait(false);
-
-                ++_docsInCurrentChunk;
             }
         }
 
