@@ -1,5 +1,6 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SimpleFts.Core.Serialization;
 using SimpleFts.Core.Utils;
 using System;
 using System.Collections.Generic;
@@ -13,7 +14,7 @@ namespace SimpleFts
 {
     public class DataFile : IDisposable
     {
-        private const int DefaultChunkSize = 1024;
+        private const int DefaultChunkSize = 64;
 
         private readonly string _bufferPath;
         private readonly string _mainPath;
@@ -51,7 +52,7 @@ namespace SimpleFts
             return await AddDocumentsAndGetChunkOffset(new List<Document>() { d }, CancellationToken.None);
         }
 
-        public async Task<long> AddDocumentsAndGetChunkOffset(IEnumerable<Document> documents, CancellationToken ct)
+        public async Task<long> AddDocumentsAndGetChunkOffset(IReadOnlyCollection<Document> documents, CancellationToken ct)
         {
             // we don't allow adding documents in parallel (it doesn't make sense anyway because of IO involved)
 
@@ -62,7 +63,7 @@ namespace SimpleFts
                 await FlushBufferIfOverflown().ConfigureAwait(false);
                 await AppendDocumentsToBuffer(documents, ct).ConfigureAwait(false);
 
-                return _main.Length;
+                return _currentLengthOfMain;
             }
             finally
             {
@@ -103,44 +104,25 @@ namespace SimpleFts
             return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
         }
 
-        private async Task AppendDocumentsToBuffer(IEnumerable<Document> docs, CancellationToken ct)
+        private async Task AppendDocumentsToBuffer(IReadOnlyCollection<Document> docs, CancellationToken ct)
         {
             using (Measured.Operation("append_document_to_buffer"))
             {
-                // TODO: what if we crash in the middle of the foreach loop?
-                foreach (var d in docs)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    var docStr = JsonConvert.SerializeObject(d);
-                    var docBytes = Encoding.UTF8.GetBytes(docStr);
-                    await _buffer.WriteAsync(docBytes, 0, docBytes.Length, ct).ConfigureAwait(false);
-                    ++_docsInCurrentChunk;
-                }
-
+                await DocumentSerializer.SerializeBatch(docs, _buffer).ConfigureAwait(false);
                 await _buffer.FlushAsync().ConfigureAwait(false);
+                _docsInCurrentChunk += docs.Count;
             }
         }
 
         private async Task<List<Document>> ReadDocumentsFromBuffer()
         {
             var serializer = new JsonSerializer();
-            var result = new List<Document>(_docsInCurrentChunk);
 
             using (Measured.Operation("read_documents_from_buffer"))
             using (var buffer = new FileStream(_bufferPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var sr = new StreamReader(buffer, Encoding.UTF8, false, 1024, true))
-            using (var jr = new JsonTextReader(sr))
             {
-                jr.SupportMultipleContent = true;
-                while (await jr.ReadAsync().ConfigureAwait(false))
-                {
-                    var doc = serializer.Deserialize<Document>(jr);
-                    result.Add(doc);
-                }
+                return await ReadDocumentsFromDecompressedStream(buffer);
             }
-
-            return result;
         }
 
         private async Task<List<Document>> ReadDocumentsFromMain(long chunkOffset)
@@ -150,24 +132,25 @@ namespace SimpleFts
             using (Measured.Operation("read_documents_from_buffer"))
             using (var main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite))
             {
-                var result = new List<Document>(_chunkSize);
-                var serializer = new JsonSerializer();
                 var chunk = await compUtils.ReadWithDecompression(main, chunkOffset).ConfigureAwait(false);
-
                 using (var ms = new MemoryStream(chunk.Array, chunk.Offset, chunk.Count))
-                using (var sr = new StreamReader(ms, Encoding.UTF8, false, 1024, true))
-                using (var jr = new JsonTextReader(sr))
                 {
-                    jr.SupportMultipleContent = true;
-                    while (await jr.ReadAsync().ConfigureAwait(false))
-                    {
-                        var doc = serializer.Deserialize<Document>(jr);
-                        result.Add(doc);
-                    }
+                    return await ReadDocumentsFromDecompressedStream(ms);
                 }
-
-                return result;
             }
+        }
+
+        private async Task<List<Document>> ReadDocumentsFromDecompressedStream(Stream stream)
+        {
+            var result = new List<Document>(_chunkSize);
+
+            while (stream.NotEof())
+            {
+                var batch = await DocumentSerializer.DeserializeBatch(stream).ConfigureAwait(false);
+                result.AddRange(batch);
+            }
+
+            return result;
         }
 
         private async Task FlushBufferIfOverflown()

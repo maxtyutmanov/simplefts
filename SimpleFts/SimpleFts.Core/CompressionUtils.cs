@@ -10,7 +10,6 @@ namespace SimpleFts
     public class CompressionUtils
     {
         private byte[] _readBuffer = new byte[100 * 1024];
-        private byte[] _originalLengthBuffer = new byte[sizeof(long)];
 
         public async Task CopyWithCompression(Stream source, Stream target)
         {

@@ -55,6 +55,21 @@ namespace SimpleFts
             await stream.WriteAsync(buffer, 0, buffer.Length);
         }
 
+        public static async Task WriteUtf8StringWithLengthAsync(this Stream stream, string val)
+        {
+            var buffer = Encoding.UTF8.GetBytes(val);
+            await stream.WriteIntAsync(buffer.Length);
+            await stream.WriteAsync(buffer, 0, buffer.Length);
+        }
+
+        public static async Task<string> ReadUtf8StringFromBufferWithLengthAsync(this Stream stream)
+        {
+            var lengthInBytes = await stream.ReadIntAsync();
+            var buffer = new byte[lengthInBytes];
+            await stream.ReadAsync(buffer, 0, buffer.Length);
+            return Encoding.UTF8.GetString(buffer);
+        }
+
         public static async Task<string> ReadUtf8StringAsync(this Stream stream, int lengthInBytes)
         {
             var buffer = new byte[lengthInBytes];

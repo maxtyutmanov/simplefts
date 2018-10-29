@@ -17,7 +17,7 @@ namespace SimpleFts
             _index = new IndexRoot(indexDir);
         }
 
-        public async Task AddDocumentsBatch(IEnumerable<Document> batch, CancellationToken ct)
+        public async Task AddDocumentsBatch(IReadOnlyCollection<Document> batch, CancellationToken ct)
         {
             long chunkOffset = await _dataFile.AddDocumentsAndGetChunkOffset(batch, ct);
 

@@ -1,6 +1,7 @@
 ﻿using SimpleFts.Core.Utils;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,14 +12,28 @@ namespace SimpleFts.LoadTests
     {
         const string RootIndexDir = @"E:\work\simplefts_store\index_root";
         const string DataDir = @"E:\work\simplefts_store\datadir";
-        const int TestSetSize = 5000;
-        const int BatchSize = 128;
+        const int TestSetSize = 10000;
+        const int BatchSize = 64;
 
         static Random _rand = new Random();
 
         static async Task Main(string[] args)
         {
+            PrepareDirs();
             await TestWithBatching();
+        }
+
+        static void PrepareDirs()
+        {
+            if (Directory.Exists(RootIndexDir))
+            {
+                Directory.Delete(RootIndexDir, true);
+            }
+
+            if (Directory.Exists(DataDir))
+            {
+                Directory.Delete(DataDir, true);
+            }
         }
 
         static async Task TestWithBatching()
@@ -68,7 +83,7 @@ namespace SimpleFts.LoadTests
 
                     if (++counter % 1000 == 0)
                     {
-                        Console.WriteLine("Performed {0} searched in the database in {1}", counter, sw.Elapsed);
+                        Console.WriteLine("Performed {0} searches in the database in {1}", counter, sw.Elapsed);
                     }
                 }
 
