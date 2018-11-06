@@ -3,6 +3,7 @@ using Newtonsoft.Json.Linq;
 using SimpleFts.Core.Serialization;
 using SimpleFts.Core.Utils;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,15 +19,15 @@ namespace SimpleFts
 
         private readonly string _bufferPath;
         private readonly string _mainPath;
-        private readonly FileStream _buffer;
+        private readonly FileStream _diskBuffer;
         private readonly FileStream _main;
         private readonly int _chunkSize;
+        private readonly ConcurrentQueue<Document> _inMemoryBuffer;
         
         // TODO: replace with async rwlock
         private readonly SemaphoreSlim _bufferLock = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _addLock = new SemaphoreSlim(1, 1);
 
-        private int _docsInCurrentChunk = 0;
         private long _currentLengthOfMain;
 
         public DataFile(string dataDir, int chunkSize = DefaultChunkSize)
@@ -36,14 +37,14 @@ namespace SimpleFts
             _bufferPath = Path.Combine(dataDir, "buffer.dat");
             _mainPath = Path.Combine(dataDir, "main.dat");
 
-            _buffer = new FileStream(_bufferPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-            _buffer.Position = _buffer.Length;
+            _diskBuffer = new FileStream(_bufferPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            _diskBuffer.Position = _diskBuffer.Length;
             _main = new FileStream(_mainPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
             _main.Position = _main.Length;
 
             _chunkSize = chunkSize;
 
-            _docsInCurrentChunk = ReadDocumentsFromBuffer().Result.Count;
+            _inMemoryBuffer = new ConcurrentQueue<Document>(ReadDocumentsFromDiskBuffer().Result);
             _currentLengthOfMain = _main.Length;
         }
 
@@ -75,46 +76,56 @@ namespace SimpleFts
         {
             _addLock.Dispose();
             _bufferLock.Dispose();
-            _buffer.Dispose();
+            _diskBuffer.Dispose();
             _main.Dispose();
         }
 
         public async Task<List<Document>> GetChunk(long chunkOffset)
         {
-            // check whether the chunk by the requested offset is in main file or in buffer
-            if (chunkOffset >= _currentLengthOfMain)
+            if (IsInMainFile(chunkOffset))
             {
-                await _bufferLock.WaitAsync().ConfigureAwait(false);
-
-                try
-                {
-                    // we have to double-check this: what if it WAS in buffer, but the buffer was flushed immediately after our check
-                    if (chunkOffset >= _currentLengthOfMain)
-                    {
-                        // this chunk is not yet flushed from the buffer into the main data file
-                        return await ReadDocumentsFromBuffer().ConfigureAwait(false);
-                    }
-                }
-                finally
-                {
-                    _bufferLock.Release();
-                }
+                return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
             }
 
-            return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
+            await _bufferLock.WaitAsync().ConfigureAwait(false);
+
+            try
+            {
+                if (IsInBuffer(chunkOffset))
+                {
+                    return ReadDocumentsFromMemoryBuffer();
+                }
+                else
+                {
+                    return await ReadDocumentsFromMain(chunkOffset).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _bufferLock.Release();
+            }
         }
 
         private async Task AppendDocumentsToBuffer(IReadOnlyCollection<Document> docs, CancellationToken ct)
         {
             using (Measured.Operation("append_document_to_buffer"))
             {
-                await DocumentSerializer.SerializeBatch(docs, _buffer).ConfigureAwait(false);
-                await _buffer.FlushAsync().ConfigureAwait(false);
-                _docsInCurrentChunk += docs.Count;
+                foreach (var doc in docs)
+                {
+                    _inMemoryBuffer.Enqueue(doc);
+                }
+
+                await DocumentSerializer.SerializeBatch(docs, _diskBuffer).ConfigureAwait(false);
+                await _diskBuffer.FlushAsync().ConfigureAwait(false);
             }
         }
 
-        private async Task<List<Document>> ReadDocumentsFromBuffer()
+        private List<Document> ReadDocumentsFromMemoryBuffer()
+        {
+            return _inMemoryBuffer.ToList();
+        }
+
+        private async Task<List<Document>> ReadDocumentsFromDiskBuffer()
         {
             var serializer = new JsonSerializer();
 
@@ -155,13 +166,13 @@ namespace SimpleFts
 
         private async Task FlushBufferIfOverflown()
         {
-            if (_docsInCurrentChunk >= _chunkSize)
+            if (_inMemoryBuffer.Count >= _chunkSize)
             {
                 await _bufferLock.WaitAsync().ConfigureAwait(false);
 
                 try
                 {
-                    if (_docsInCurrentChunk >= _chunkSize)
+                    if (_inMemoryBuffer.Count >= _chunkSize)
                     {
                         await FlushBuffer().ConfigureAwait(false);
                     }
@@ -175,22 +186,31 @@ namespace SimpleFts
 
         private async Task FlushBuffer()
         {
+            if (_inMemoryBuffer.Count == 0)
+                return;
+
             using (Measured.Operation("flush_datafile_buffer"))
+            using (var ms = new MemoryStream())
             {
+                var tmpBuffer = ReadDocumentsFromMemoryBuffer();
                 var compUtils = new CompressionUtils();
 
-                if (_buffer.Length == 0)
-                {
-                    return;
-                }
-
-                await compUtils.CopyWithCompression(_buffer, _main).ConfigureAwait(false);
+                await DocumentSerializer.SerializeBatch(tmpBuffer, ms).ConfigureAwait(false);
+                await compUtils.CopyWithCompression(ms, _main).ConfigureAwait(false);
                 await _main.FlushAsync().ConfigureAwait(false);
                 _currentLengthOfMain = _main.Length;
-                _docsInCurrentChunk = 0;
-                // truncate buffer
-                _buffer.SetLength(0);
+                // truncate disk buffer
+                _diskBuffer.SetLength(0);
+
+                for (int i = 0; i < tmpBuffer.Count; i++)
+                {
+                    _inMemoryBuffer.TryDequeue(out _);
+                }
             }
         }
+
+        private bool IsInMainFile(long offset) => offset < _currentLengthOfMain;
+
+        private bool IsInBuffer(long offset) => !IsInMainFile(offset);
     }
 }
