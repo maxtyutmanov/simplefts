@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using InMemoryIndex = System.Collections.Concurrent.ConcurrentDictionary<string, SimpleFts.Utils.ConcurrentHashSet<long>>;
+using InMemoryIndexEntry = System.Collections.Generic.KeyValuePair<string, SimpleFts.Utils.ConcurrentHashSet<long>>;
 using SimpleFts.Utils;
 using SimpleFts.Core.Utils;
 
@@ -122,15 +123,41 @@ namespace SimpleFts
                  * <end-of-index marker>
                  */
 
+                var footeringFactor = (int)Math.Sqrt(oldInMemoryIx.Count);
+                var footerItems = new List<KeyValuePair<string, long>>(footeringFactor + 1);
+
+                var i = 0;
                 using (var newIxFile = OpenNextIndexFileForWrite())
                 {
+                    newIxFile.Position += sizeof(long);
+
                     foreach (var termWithPostingList in oldInMemoryIx.OrderBy(x => x.Key))
                     {
+                        var isLastItem = i == oldInMemoryIx.Count - 1;
+                        if (i % footeringFactor == 0 || isLastItem)
+                        {
+                            footerItems.Add(new KeyValuePair<string, long>(termWithPostingList.Key, newIxFile.Position));
+                        }
                         await WriteTermAndPostingList(newIxFile, termWithPostingList.Key, termWithPostingList.Value);
+                        ++i;
                     }
+
+                    var footerStartPosition = newIxFile.Position;
+                    await WriteIndexFooter(newIxFile, footerItems);
+                    newIxFile.Position = 0;
+                    await newIxFile.WriteLongAsync(footerStartPosition);
 
                     await newIxFile.FlushAsync();
                 }
+            }
+        }
+
+        private async Task WriteIndexFooter(FileStream indexFile, List<KeyValuePair<string, long>> footerItems)
+        {
+            foreach (var item in footerItems)
+            {
+                await indexFile.WriteUtf8StringWithLengthAsync(item.Key);
+                await indexFile.WriteLongAsync(item.Value);
             }
         }
 
@@ -162,7 +189,16 @@ namespace SimpleFts
             using (Measured.Operation("search_index_file"))
             using (var ixFile = new FileStream(indexFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                while (ixFile.NotEof())
+                // roughly navigate to the position in the index file where the term could be
+                var preliminaryPosition = SearchIndexFileFooter(ixFile, targetTerm, comparer, out var footerPos);
+                if (preliminaryPosition == null)
+                {
+                    yield break;
+                }
+
+                ixFile.Position = preliminaryPosition.Value;
+
+                while (ixFile.Position != footerPos)
                 {
                     var nextTermOffset = ixFile.ReadLong();
 
@@ -195,6 +231,40 @@ namespace SimpleFts
                     }
                 }
             }
+        }
+
+        private long? SearchIndexFileFooter(FileStream ixFile, string targetTerm, IComparer<string> comparer, out long footerPos)
+        {
+            footerPos = ixFile.ReadLong();
+            var mainIxStartPosition = ixFile.Position;
+            ixFile.Position = footerPos;
+
+            var prevCmpResult = 0;
+            var prevTermPosition = mainIxStartPosition;
+
+            while (ixFile.NotEof())
+            {
+                var termLengthInBytes = ixFile.ReadInt();
+                var term = ixFile.ReadUtf8String(termLengthInBytes);
+                var termPosition = ixFile.ReadLong();
+                var cmpResult = comparer.Compare(term, targetTerm);
+
+                if (cmpResult == 0)
+                {
+                    return termPosition;
+                }
+
+                // sign has changed
+                if (cmpResult * prevCmpResult < 0)
+                {
+                    return prevTermPosition;
+                }
+
+                prevTermPosition = termPosition;
+                prevCmpResult = cmpResult;
+            }
+
+            return null;
         }
 
         private async Task WriteTermAndPostingList(Stream ixStream, string term, ConcurrentHashSet<long> postingList)
