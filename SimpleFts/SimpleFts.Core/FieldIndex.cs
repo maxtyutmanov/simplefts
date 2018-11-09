@@ -116,11 +116,32 @@ namespace SimpleFts
                 /*
                  * Index file structure:
                  * 
-                 * <file offset (in bytes) of term 2> <length of term 1 representation (in bytes)> <term 1 UTF-8 bytes> <number of items in the posting list 1> <item 1 of the posting list 1> ... <item N of the posting list 1>
-                 * <file offset (in bytes) of term 3> <length of term 2 representation (in bytes)> <term 2 UTF-8 bytes> <number of items in the posting list 2> <item 2 of the posting list 2> ... <item N of the posting list 2>
+                 * <file offset (in bytes) of footer (long)> 
+                 * <main part>
+                 * <footer> 
+                 * 
+                 * Footer includes sqrt(N) sorted terms with their position in the main part and allows for faster seeks in O(2*sqrt(N))
+                 */
+                 
+                /* 
+                 * <main part> structure:
+                 * <file offset (in bytes) of term 2> <term 1 length in bytes> <term 1 UTF-8 bytes> <number of items in the posting list 1> <item 1 of the posting list 1> ... <item N of the posting list 1>
+                 * <file offset (in bytes) of term 3> <term 2 length in bytes> <term 2 UTF-8 bytes> <number of items in the posting list 2> <item 2 of the posting list 2> ... <item N of the posting list 2>
                  * ...
                  * (this goes on for all terms in the index)
-                 * <end-of-index marker>
+                 */
+
+                /*
+                 * <footer> structure:
+                 * (N - total number of terms in the index file, K = sqrt(N))
+                 * 
+                 * <term 1 length in bytes> <term 1 UTF-8 bytes> <term 1 position in main index part>
+                 * <term K length in bytes> <term K UTF-8 bytes> <term K position in main index part>
+                 * <term 2K length in bytes> <term 2K UTF-8 bytes> <term 2K position in main index part>
+                 * ...
+                 * <last term length in bytes> <last term UTF-8 bytes> <last term position in main index part>
+                 * 
+                 * (note that 1st and last terms are always included)
                  */
 
                 var footeringFactor = (int)Math.Sqrt(oldInMemoryIx.Count);
@@ -245,22 +266,24 @@ namespace SimpleFts
             while (ixFile.NotEof())
             {
                 var termLengthInBytes = ixFile.ReadInt();
-                var term = ixFile.ReadUtf8String(termLengthInBytes);
-                var termPosition = ixFile.ReadLong();
-                var cmpResult = comparer.Compare(term, targetTerm);
+                var curTerm = ixFile.ReadUtf8String(termLengthInBytes);
+                var curTermPosition = ixFile.ReadLong();
+                var cmpResult = comparer.Compare(curTerm, targetTerm);
 
+                // Exact match: the term was found in the footer
                 if (cmpResult == 0)
                 {
-                    return termPosition;
+                    return curTermPosition;
                 }
 
-                // sign has changed
+                // Sign has changed, it means: prevTerm < targetTerm < curTerm, which means that
+                // the target term may be in the main index part between previous and current term
                 if (cmpResult * prevCmpResult < 0)
                 {
                     return prevTermPosition;
                 }
 
-                prevTermPosition = termPosition;
+                prevTermPosition = curTermPosition;
                 prevCmpResult = cmpResult;
             }
 
