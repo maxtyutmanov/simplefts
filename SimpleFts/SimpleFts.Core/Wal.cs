@@ -1,4 +1,5 @@
 ﻿using SimpleFts.Core.Serialization;
+using SimpleFts.Core.Utils;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -9,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace SimpleFts.Core
 {
-    public class Wal
+    public class Wal : IDisposable
     {
         private readonly FileStream _file;
         private readonly SemaphoreSlim _commitLock = new SemaphoreSlim(1, 1);
@@ -26,12 +27,22 @@ namespace SimpleFts.Core
 
             try
             {
-                await DocumentSerializer.SerializeBatch(tran.Documents, _file).ConfigureAwait(false);
+                using (Measured.Operation("wal_commit"))
+                {
+                    await DocumentSerializer.SerializeBatch(tran.Documents, _file).ConfigureAwait(false);
+                    await _file.FlushAsync().ConfigureAwait(false);
+                }
             }
             finally
             {
                 _commitLock.Release();
             }
+        }
+
+        public void Dispose()
+        {
+            _file.Dispose();
+            _commitLock.Dispose();
         }
     }
 }

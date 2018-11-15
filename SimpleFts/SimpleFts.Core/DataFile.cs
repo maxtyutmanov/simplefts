@@ -1,8 +1,10 @@
 ﻿using SimpleFts.Core.Serialization;
+using SimpleFts.Core.Utils;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,16 +15,9 @@ namespace SimpleFts.Core
     {
         public Dictionary<long, List<Document>> DocsByOffsets { get; set; } = new Dictionary<long, List<Document>>();
 
-        public long LastBatchOffset { get; private set; }
-
         public void Record(long offset, List<Document> batch)
         {
             DocsByOffsets[offset] = batch;
-
-            if (offset > LastBatchOffset)
-            {
-                LastBatchOffset = offset;
-            }
         }
     }
 
@@ -33,11 +28,13 @@ namespace SimpleFts.Core
         private readonly ConcurrentQueue<Document> _nonPersistedQ = new ConcurrentQueue<Document>();
         private readonly FileStream _file;
         private readonly string _filePath;
-        private readonly SemaphoreSlim _commitLock;
+        private readonly int _batchSize;
+        private readonly SemaphoreSlim _commitLock = new SemaphoreSlim(1, 1);
 
         public DataFile(string filePath, int batchSize = DefaultBatchSize)
         {
             _filePath = filePath;
+            _batchSize = batchSize;
             _file = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
 
@@ -53,6 +50,8 @@ namespace SimpleFts.Core
 
         public async Task<List<Document>> GetChunk(long offset)
         {
+            var compression = new CompressionUtils();
+
             if (offset >= _file.Length)
             {
                 // should NEVER happen
@@ -61,20 +60,39 @@ namespace SimpleFts.Core
 
             using (var file = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                file.Position = offset;
-                var batch = await DocumentSerializer.DeserializeBatch(file).ConfigureAwait(false);
-                return batch;
+                var segment = await compression.ReadWithDecompression(file, offset);
+
+                using (var ms = new MemoryStream(segment.Array, segment.Offset, segment.Count))
+                {
+                    var batch = await DocumentSerializer.DeserializeBatch(ms).ConfigureAwait(false);
+                    return batch;
+                }
+            }
+        }
+
+        public IEnumerable<Document> SearchNonPersistedDocs(Func<Document, bool> predicate)
+        {
+            _commitLock.Wait();
+
+            try
+            {
+                return _nonPersistedQ.Where(predicate).ToList();
+            }
+            finally
+            {
+                _commitLock.Release();
             }
         }
 
         public void Dispose()
         {
             _file.Dispose();
+            _commitLock.Dispose();
         }
 
         private async Task<DataFileOffsets> CommitIfRequired()
         {
-            if (_nonPersistedQ.Count < DefaultBatchSize)
+            if (_nonPersistedQ.Count < _batchSize)
             {
                 return null;
             }
@@ -83,12 +101,15 @@ namespace SimpleFts.Core
 
             try
             {
-                if (_nonPersistedQ.Count < DefaultBatchSize)
+                if (_nonPersistedQ.Count < _batchSize)
                 {
                     return null;
                 }
 
-                return await Commit().ConfigureAwait(false);
+                using (Measured.Operation("datafile_commit"))
+                {
+                    return await Commit().ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -98,16 +119,22 @@ namespace SimpleFts.Core
 
         private async Task<DataFileOffsets> Commit()
         {
+            var compression = new CompressionUtils();
             var offsets = new DataFileOffsets();
 
-            while (_nonPersistedQ.Count >= DefaultBatchSize)
+            while (_nonPersistedQ.Count >= _batchSize)
             {
                 var batchStartPos = _file.Position;
+                var nextBatch = ReadNextBatchFromQueue();
 
-                var batch = ReadNextBatchFromQueue();
-                await DocumentSerializer.SerializeBatch(batch, _file).ConfigureAwait(false);
+                using (var ms = new MemoryStream())
+                {
+                    await DocumentSerializer.SerializeBatch(nextBatch, ms).ConfigureAwait(false);
+                    await compression.CopyWithCompression(ms, _file).ConfigureAwait(false);
+                    await _file.FlushAsync().ConfigureAwait(false);
+                }
 
-                offsets.Record(batchStartPos, batch);
+                offsets.Record(batchStartPos, nextBatch);
             }
 
             return offsets;
@@ -115,9 +142,9 @@ namespace SimpleFts.Core
 
         private List<Document> ReadNextBatchFromQueue()
         {
-            var batch = new List<Document>(DefaultBatchSize);
+            var batch = new List<Document>(_batchSize);
 
-            while (batch.Count < DefaultBatchSize)
+            while (batch.Count < _batchSize)
             {
                 var dequeuedOk = _nonPersistedQ.TryDequeue(out var doc);
                 if (!dequeuedOk)

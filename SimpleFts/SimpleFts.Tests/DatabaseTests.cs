@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using SimpleFts.Core;
 using System;
 using System.Collections.Generic;
 using System.IO;

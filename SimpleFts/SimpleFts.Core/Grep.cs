@@ -21,7 +21,7 @@ namespace SimpleFts
             }
         }
 
-        private bool IsMatch(SearchQuery query, Document doc)
+        public bool IsMatch(SearchQuery query, Document doc)
         {
             if (doc.Fields.TryGetValue(query.Field, out var docFieldValue))
             {

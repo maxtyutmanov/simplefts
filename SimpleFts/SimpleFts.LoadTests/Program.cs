@@ -1,4 +1,5 @@
-﻿using SimpleFts.Core.Utils;
+﻿using SimpleFts.Core;
+using SimpleFts.Core.Utils;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -49,7 +50,7 @@ namespace SimpleFts.LoadTests
                 var sw = Stopwatch.StartNew();
                 foreach (var docsBatch in docs.GetByBatches(BatchSize))
                 {
-                    await db.AddDocumentsBatch(docsBatch, CancellationToken.None);
+                    await db.AddDocuments(docsBatch);
                     if (++counter % 10 == 0)
                     {
                         Console.WriteLine("Added {0} documents to the DB in {1}", counter * BatchSize, sw.Elapsed);
