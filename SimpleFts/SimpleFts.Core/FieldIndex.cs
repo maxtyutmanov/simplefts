@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using InMemoryIndex = System.Collections.Concurrent.ConcurrentDictionary<string, SimpleFts.Utils.ConcurrentHashSet<long>>;
-using InMemoryIndexEntry = System.Collections.Generic.KeyValuePair<string, SimpleFts.Utils.ConcurrentHashSet<long>>;
 using SimpleFts.Utils;
 using SimpleFts.Core.Utils;
 

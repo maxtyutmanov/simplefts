@@ -4,7 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SimpleFts
+namespace SimpleFts.Core
 {
     public class Database : IDisposable
     {
@@ -15,16 +15,6 @@ namespace SimpleFts
         {
             _dataFile = new DataFile(dataDir);
             _index = new IndexRoot(indexDir);
-        }
-
-        public async Task AddDocumentsBatch(IReadOnlyCollection<Document> batch, CancellationToken ct)
-        {
-            long chunkOffset = await _dataFile.AddDocumentsAndGetChunkOffset(batch, ct);
-
-            foreach (var doc in batch)
-            {
-                await _index.AddDocument(doc, chunkOffset);
-            }
         }
 
         public async Task AddDocument(Document doc)
