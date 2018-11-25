@@ -10,12 +10,16 @@ namespace SimpleFts.Core.Serialization
     {
         public static async Task SerializeBatch(IReadOnlyCollection<Document> docsBatch, Stream stream)
         {
+            var batchStartOffset = stream.Position;
+
             await stream.WriteIntAsync(docsBatch.Count);
 
             foreach (var doc in docsBatch)
             {
                 await SerializeOneDocument(doc, stream);
             }
+
+            await stream.WriteLongAsync(batchStartOffset);
         }
 
         public static async Task<List<Document>> DeserializeBatch(Stream stream)
@@ -29,11 +33,28 @@ namespace SimpleFts.Core.Serialization
                 batch.Add(doc);
             }
 
+            stream.Position += sizeof(long);
+            return batch;
+        }
+
+        public static async Task<List<Document>> DeserializeBatchFromRightToLeft(Stream stream)
+        {
+            stream.Position -= sizeof(long);
+            var batchStartOffset = await stream.ReadLongAsync();
+            stream.Position = batchStartOffset;
+
+            var batch = await DeserializeBatch(stream);
+
+            // since we read from the end to the beginning, it makes sense
+            // to move position to the beginning of the batch after we read it
+            stream.Position = batchStartOffset - sizeof(long);
+
             return batch;
         }
 
         private static async Task SerializeOneDocument(Document doc, Stream stream)
         {
+            await stream.WriteLongAsync(doc.Id);
             await stream.WriteIntAsync(doc.Fields.Count);
             
             foreach (var field in doc.Fields)
@@ -46,6 +67,7 @@ namespace SimpleFts.Core.Serialization
         private static async Task<Document> DeserializeOneDocument(Stream stream)
         {
             var doc = new Document();
+            doc.Id = await stream.ReadLongAsync();
             var fieldsCount = await stream.ReadIntAsync();
 
             for (int i = 0; i < fieldsCount; i++)

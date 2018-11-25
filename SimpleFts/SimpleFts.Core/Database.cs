@@ -74,27 +74,28 @@ namespace SimpleFts.Core
         private async Task CommitTran(Tran tran)
         {
             // persist in write ahead log
-            await _wal.Commit(tran).ConfigureAwait(false);
+            await _wal.CommitTran(tran).ConfigureAwait(false);
 
-            // add new record to datafile (it may not get commited to disk right away)
-            var offsetsMap = await _dataFile.Apply(tran).ConfigureAwait(false);
+            // add new records to datafile (it may not get committed to disk right away)
+            var commitInfo = await _dataFile.Apply(tran).ConfigureAwait(false);
 
-            // update inverted index
-            await UpdateIndex(offsetsMap).ConfigureAwait(false);
+            if (commitInfo != null)
+            {
+                // some data was committed to datafile, need to update inverted index
+                await UpdateIndex(commitInfo.DocsByOffsets).ConfigureAwait(false);
+                await _wal.Checkpoint(commitInfo.LastCommittedDocId);
+            }
         }
 
-        private async Task UpdateIndex(DataFileOffsets offsetsMap)
+        private async Task UpdateIndex(Dictionary<long, List<Document>> offsetsMap)
         {
-            if (offsetsMap != null)
+            foreach (var entry in offsetsMap)
             {
-                foreach (var entry in offsetsMap.DocsByOffsets)
-                {
-                    var offset = entry.Key;
+                var offset = entry.Key;
 
-                    foreach (var d in entry.Value)
-                    {
-                        await _index.AddDocument(d, offset).ConfigureAwait(false);
-                    }
+                foreach (var d in entry.Value)
+                {
+                    await _index.AddDocument(d, offset).ConfigureAwait(false);
                 }
             }
         }

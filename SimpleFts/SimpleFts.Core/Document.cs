@@ -8,6 +8,7 @@ namespace SimpleFts
     public class Document
     {
         public Dictionary<string, string> Fields { get; } = new Dictionary<string, string>();
+        internal long Id { get; set; }
 
         public void SetField(string fieldName, string fieldValue)
         {

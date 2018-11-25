@@ -11,11 +11,21 @@ using System.Threading.Tasks;
 
 namespace SimpleFts.Core
 {
-    public class DataFileOffsets
+    public class DataFileCommitInfo
     {
-        public Dictionary<long, List<Document>> DocsByOffsets { get; set; } = new Dictionary<long, List<Document>>();
+        public Dictionary<long, List<Document>> DocsByOffsets { get; } = new Dictionary<long, List<Document>>();
 
-        public void Record(long offset, List<Document> batch)
+        public long LastCommittedDocId
+        {
+            get
+            {
+                var maxOffset = DocsByOffsets.Keys.Max();
+                var maxDocId = DocsByOffsets[maxOffset].Select(d => d.Id).Max();
+                return maxDocId;
+            }
+        }
+
+        public void RecordCommittedBatch(long offset, List<Document> batch)
         {
             DocsByOffsets[offset] = batch;
         }
@@ -38,7 +48,7 @@ namespace SimpleFts.Core
             _file = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
 
-        public async Task<DataFileOffsets> Apply(Tran tran)
+        public async Task<DataFileCommitInfo> Apply(Tran tran)
         {
             foreach (var doc in tran.Documents)
             {
@@ -90,7 +100,7 @@ namespace SimpleFts.Core
             _commitLock.Dispose();
         }
 
-        private async Task<DataFileOffsets> CommitIfRequired()
+        private async Task<DataFileCommitInfo> CommitIfRequired()
         {
             if (_nonPersistedQ.Count < _batchSize)
             {
@@ -117,10 +127,10 @@ namespace SimpleFts.Core
             }
         }
 
-        private async Task<DataFileOffsets> Commit()
+        private async Task<DataFileCommitInfo> Commit()
         {
             var compression = new CompressionUtils();
-            var offsets = new DataFileOffsets();
+            var commitInfo = new DataFileCommitInfo();
 
             while (_nonPersistedQ.Count >= _batchSize)
             {
@@ -134,10 +144,10 @@ namespace SimpleFts.Core
                     await _file.FlushAsync().ConfigureAwait(false);
                 }
 
-                offsets.Record(batchStartPos, nextBatch);
+                commitInfo.RecordCommittedBatch(batchStartPos, nextBatch);
             }
 
-            return offsets;
+            return commitInfo;
         }
 
         private List<Document> ReadNextBatchFromQueue()

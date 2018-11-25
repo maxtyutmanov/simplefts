@@ -7,15 +7,12 @@ namespace SimpleFts.Core
 {
     public class Tran
     {
-        private readonly Queue<Document> _docs = new Queue<Document>();
+        private readonly List<Document> _docs = new List<Document>();
 
         public static Tran WithDocuments(IEnumerable<Document> docs)
         {
             var tran = new Tran();
-            foreach (var doc in docs)
-            {
-                tran.AddDocument(doc);
-            }
+            tran._docs.AddRange(docs);
             return tran;
         }
 
@@ -28,9 +25,9 @@ namespace SimpleFts.Core
 
         public void AddDocument(Document doc)
         {
-            _docs.Enqueue(doc);
+            _docs.Add(doc);
         }
 
-        public IReadOnlyCollection<Document> Documents => _docs;
+        public IReadOnlyList<Document> Documents => _docs;
     }
 }
