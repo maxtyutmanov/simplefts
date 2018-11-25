@@ -33,7 +33,7 @@ namespace SimpleFts.Core
 
     public class DataFile : IDisposable
     {
-        private const int DefaultBatchSize = 64;
+        private const int DefaultBatchSize = 128;
 
         private readonly ConcurrentQueue<Document> _nonPersistedQ = new ConcurrentQueue<Document>();
         private readonly FileStream _file;

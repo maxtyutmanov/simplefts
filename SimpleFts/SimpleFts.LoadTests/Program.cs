@@ -13,7 +13,7 @@ namespace SimpleFts.LoadTests
     {
         const string RootIndexDir = @"E:\work\simplefts_store\index_root";
         const string DataDir = @"E:\work\simplefts_store\datadir";
-        const int TestSetSize = 10000;
+        const int TestSetSize = 1000000;
         const int BatchSize = 64;
 
         static Random _rand = new Random();

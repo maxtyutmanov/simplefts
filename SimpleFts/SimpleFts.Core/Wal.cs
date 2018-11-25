@@ -13,7 +13,7 @@ namespace SimpleFts.Core
 {
     public class Wal : IDisposable
     {
-        private const long DefaultMaxSize = 10 * 1024 * 1024;   // 10 MB
+        private const long DefaultMaxSize = 10 * 1024 * 1024;   // 1 KB
         
         private FileStream _file;
         private readonly SemaphoreSlim _commitLock = new SemaphoreSlim(1, 1);
@@ -90,24 +90,18 @@ namespace SimpleFts.Core
         {
             using (Measured.Operation("wal_truncate"))
             {
-                try
-                {
-                    _file.Position = _file.Length;
+                _file.Position = _file.Length;
 
-                    while (_file.Position != 0)
+                while (_file.Position != 0)
+                {
+                    var batch = await DocumentSerializer.DeserializeBatchFromRightToLeft(_file);
+                    var firstDocIdInBatch = batch[0].Id;
+
+                    if (docId >= firstDocIdInBatch)
                     {
-                        var batch = await DocumentSerializer.DeserializeBatchFromRightToLeft(_file);
-                        var firstDocIdInBatch = batch[0].Id;
-
-                        if (docId >= firstDocIdInBatch)
-                        {
-                            await TruncateByFileOffset(_file.Position);
-                        }
+                        await TruncateByFileOffset(_file.Position);
+                        break;
                     }
-                }
-                finally
-                {
-                    _file.Position = _file.Length;
                 }
             }
         }
@@ -127,6 +121,11 @@ namespace SimpleFts.Core
             _file.Dispose();
             try
             {
+                if (File.Exists($"{_walPath}.old"))
+                {
+                    File.Delete($"{_walPath}.old");
+                }
+
                 File.Move(_walPath, $"{_walPath}.old");
                 File.Move(tmpWalPath, _walPath);
             }
