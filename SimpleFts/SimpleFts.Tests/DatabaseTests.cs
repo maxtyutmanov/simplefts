@@ -175,23 +175,29 @@ namespace SimpleFts.Tests
             doc1.Fields.Add("name", "john");
             doc1.Fields.Add("favoriteAnimal", "seal");
 
+            var doc2 = new Document();
+            doc2.Fields.Add("id", "idOfDoc2");
+            doc2.Fields.Add("name", "john");
+            doc2.Fields.Add("favoriteAnimal", "seal");
+
             await _db.AddDocument(doc1);
+            await _db.AddDocument(doc2);
 
             _db.Dispose();
             _db = new Database(DataDir, RootIndexDir);
 
-            var doc2 = new Document();
-            doc2.Fields.Add("id", "idOfDoc2");
-            doc2.Fields.Add("name", "jack");
-            doc2.Fields.Add("favoriteAnimal", "seal");
+            var doc3 = new Document();
+            doc3.Fields.Add("id", "idOfDoc3");
+            doc3.Fields.Add("name", "ivan");
+            doc3.Fields.Add("favoriteAnimal", "seal");
 
-            await _db.AddDocument(doc2);
+            await _db.AddDocument(doc3);
 
             _db.Search(new SearchQuery()
             {
                 Field = "favoriteAnimal",
                 Term = "seal"
-            }).Should().BeEquivalentTo(new[] { doc1, doc2 });
+            }).Should().BeEquivalentTo(new[] { doc1, doc2, doc3 });
         }
 
         private async Task ExecuteTestSetInSeparateThread(Document[] testSet)
