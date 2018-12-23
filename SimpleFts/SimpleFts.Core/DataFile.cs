@@ -46,6 +46,32 @@ namespace SimpleFts.Core
             _filePath = filePath;
             _batchSize = batchSize;
             _file = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+            _file.Position = _file.Length;
+        }
+
+        public async Task<long> GetLastDocId()
+        {
+            if (_file.Length == 0)
+            {
+                return 0;
+            }
+
+            var initialPos = _file.Position;
+            try
+            {
+                var compression = new CompressionUtils();
+                var segment = await compression.ReadWithDecompressionFromRightToLeft(_file, _file.Length);
+
+                using (var ms = new MemoryStream(segment.Array, segment.Offset, segment.Count))
+                {
+                    var batch = await DocumentSerializer.DeserializeBatch(ms).ConfigureAwait(false);
+                    return batch.Last().Id;
+                }
+            }
+            finally
+            {
+                _file.Position = initialPos;
+            }
         }
 
         public async Task<DataFileCommitInfo> Apply(Tran tran)
@@ -65,7 +91,7 @@ namespace SimpleFts.Core
             if (offset >= _file.Length)
             {
                 // should NEVER happen
-                throw new InvalidOperationException("Specified position doesn't exists in data file");
+                throw new InvalidOperationException("Specified position doesn't exist in data file");
             }
 
             using (var file = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))

@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace SimpleFts.Core
@@ -15,8 +13,6 @@ namespace SimpleFts.Core
 
         public Database(string dataDir, string indexDir)
         {
-            // TODO: recovery phase
-
             Directory.CreateDirectory(dataDir);
 
             var logPath = Path.Combine(dataDir, "log.dat");
@@ -25,6 +21,8 @@ namespace SimpleFts.Core
             _wal = new Wal(logPath);
             _dataFile = new DataFile(datafilePath);
             _index = new IndexRoot(indexDir);
+
+            Recover().GetAwaiter().GetResult();
         }
 
         public async Task AddDocument(Document doc)
@@ -69,6 +67,13 @@ namespace SimpleFts.Core
         {
             _wal.Dispose();
             _dataFile.Dispose();
+        }
+
+        private async Task Recover()
+        {
+            var docIdInDataFile = await _dataFile.GetLastDocId();
+            var docsFromWal = await _wal.ReadDocsAfter(docIdInDataFile);
+            await _dataFile.Apply(Tran.WithDocuments(docsFromWal));
         }
 
         private async Task CommitTran(Tran tran)

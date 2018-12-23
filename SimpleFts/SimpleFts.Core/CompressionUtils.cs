@@ -15,6 +15,8 @@ namespace SimpleFts
         {
             source.Position = 0;
 
+            var startPos = target.Position;
+
             await target.WriteLongAsync(source.Length);
 
             GZipStream gzip = null;
@@ -27,6 +29,8 @@ namespace SimpleFts
             {
                 gzip?.Dispose();
             }
+
+            await target.WriteLongAsync(startPos);
         }
 
         public async Task<ArraySegment<byte>> ReadWithDecompression(Stream source, long chunkOffset)
@@ -51,6 +55,12 @@ namespace SimpleFts
                 
                 return new ArraySegment<byte>(_readBuffer, 0, (int)originalLength);
             }
+        }
+
+        public async Task<ArraySegment<byte>> ReadWithDecompressionFromRightToLeft(Stream source, long endOffset)
+        {
+            var startPos = await source.ReadLongAsync();
+            return await ReadWithDecompression(source, startPos);
         }
     }
 }
