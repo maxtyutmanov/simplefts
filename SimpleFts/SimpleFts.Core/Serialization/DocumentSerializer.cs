@@ -47,10 +47,7 @@ namespace SimpleFts.Core.Serialization
 
             // since we read from the end to the beginning, it makes sense
             // to move position to the beginning of the batch after we read it
-            if (batchStartOffset != 0)
-            {
-                stream.Position = batchStartOffset - sizeof(long);
-            }
+            stream.Position = batchStartOffset;
 
             return batch;
         }

@@ -28,7 +28,42 @@ namespace SimpleFts.Core
             _file.Position = _file.Length;
             _walPath = walPath;
             _maxFileSize = maxFileSize;
-            _docIdGenerator = new DocIdGenerator(0);
+            _docIdGenerator = CreateDocIdGenerator().GetAwaiter().GetResult();
+        }
+
+        public async Task<List<Document>> ReadDocsAfter(long docId)
+        {
+            var batches = new List<List<Document>>();
+
+            _file.Position = _file.Length;
+            try
+            {
+                while (_file.Position > 0)
+                {
+                    var batch = await DocumentSerializer.DeserializeBatchFromRightToLeft(_file);
+                    batches.Add(batch);
+
+                    if (batch.First().Id <= docId)
+                    {
+                        break;
+                    }
+                }
+
+                var result = new List<Document>();
+                foreach (var doc in batches.SelectMany(x => x))
+                {
+                    if (doc.Id > docId)
+                    {
+                        result.Add(doc);
+                    }
+                }
+
+                return result;
+            }
+            finally
+            {
+                _file.Position = _file.Length;
+            }
         }
 
         public async Task CommitTran(Tran tran)
@@ -84,6 +119,26 @@ namespace SimpleFts.Core
         {
             _file.Dispose();
             _commitLock.Dispose();
+        }
+
+        private async Task<DocIdGenerator> CreateDocIdGenerator()
+        {
+            if (_file.Length == 0)
+            {
+                return new DocIdGenerator(0);
+            }
+
+            var initialPos = _file.Position;
+            try
+            {
+                var lastBatch = await DocumentSerializer.DeserializeBatchFromRightToLeft(_file);
+                var lastDoc = lastBatch[lastBatch.Count - 1];
+                return new DocIdGenerator(lastDoc.Id);
+            }
+            finally
+            {
+                _file.Position = initialPos;
+            }
         }
 
         private async Task TruncateByDocId(long docId)
