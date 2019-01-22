@@ -60,7 +60,7 @@ namespace SimpleFts.Core
             try
             {
                 var compression = new CompressionUtils();
-                var segment = await compression.ReadWithDecompressionFromRightToLeft(_file, _file.Length);
+                var segment = await compression.ReadWithDecompressionFromRightToLeft(_file);
 
                 using (var ms = new MemoryStream(segment.Array, segment.Offset, segment.Count))
                 {

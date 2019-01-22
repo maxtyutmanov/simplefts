@@ -57,8 +57,9 @@ namespace SimpleFts
             }
         }
 
-        public async Task<ArraySegment<byte>> ReadWithDecompressionFromRightToLeft(Stream source, long endOffset)
+        public async Task<ArraySegment<byte>> ReadWithDecompressionFromRightToLeft(Stream source)
         {
+            source.Position -= sizeof(long);
             var startPos = await source.ReadLongAsync();
             return await ReadWithDecompression(source, startPos);
         }
